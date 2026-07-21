@@ -1,87 +1,76 @@
-# ConKiosk Faculty Mobile App - PRD
+# ConKiosk – Complete Consultation Management System
 
 ## Overview
-A professional mobile application for university faculty to manage student consultation requests. Connects to a Raspberry Pi 5 server via REST API and Socket.io for real-time synchronization.
+An integrated 4-component consultation management system for universities:
+1. **Faculty Mobile App** – JWT-authenticated, manage requests, availability, history
+2. **Student Kiosk** – Public touchscreen for QR/manual student identification & consultation requests
+3. **TV Queue Display** – Real-time dashboard showing all faculty status & queues
+4. **Raspberry Pi 5 Backend** – FastAPI + MongoDB + Socket.IO (central server)
 
 ## Tech Stack
-- **Frontend**: Expo (React Native) + TypeScript + Expo Router
-- **Backend**: FastAPI + MongoDB + Socket.io
-- **Auth**: JWT (30-day expiration)
-- **Storage**: Secure storage for tokens (expo-secure-store), AsyncStorage for faculty data
-- **Real-time**: Socket.io (works well on Raspberry Pi 5)
+- **Frontend**: Expo (React Native) + TypeScript + Expo Router (all 3 UIs in one project)
+- **Backend**: FastAPI + MongoDB + python-socketio (works on RPi 5)
+- **Auth**: JWT (30-day expiration) with bcrypt password hashing
+- **Real-time**: Socket.IO for instant sync across all components
 
-## Features Implemented
+## Deliverables
+- **Mobile App** (faculty): 5-tab bottom nav (Dashboard, Requests, History, Notifications, Profile)
+- **Kiosk UI** (`/kiosk` route): faculty grid → identify (QR/manual, individual/group) → request → confirmation with queue number
+- **TV Display** (`/tv` route): dark-theme dashboard with live status, "Now Serving", waiting counts, next queue numbers, live clock
+- **Backend**: 30+ REST endpoints, WebSocket events
+- **RPi 5 Deployment Guide** (`/app/RPI5_DEPLOYMENT.md`)
 
-### Authentication
-- School ID + Password login (JWT-based)
-- Secure token storage
-- Auto-login on app relaunch
-- Change password functionality
-- Logout with confirmation
+## Key Flows Working End-to-End
 
-### Dashboard
-- Personalized greeting with faculty photo
-- One-tap availability status (Available/Busy/Unavailable) with color coding
-- Today's consultations count
-- Pending requests count
-- Monthly consultation summary
-- Upcoming consultations list
-- Quick action buttons
+### Kiosk → Queue → TV Display → Faculty App
+1. Student scans QR (or types) at kiosk → auto-fills info
+2. Selects faculty → enters topic → submits
+3. **Queue #N assigned + shown on kiosk confirmation**
+4. TV Display updates in real-time (Socket.IO)
+5. Faculty receives notification on mobile app
+6. Faculty accepts → consultation record created with queue linkage
+7. Faculty taps "Start Consultation" → status auto-changes to Busy, TV shows "Now Serving #N"
+8. Faculty taps "Complete" → duration computed, queue advances, faculty auto-set to Available
 
-### Consultation Requests
-- View all pending requests with student details
-- Accept requests (creates consultation record)
-- Decline requests with optional reason
-- Reschedule with date/time picker
-- Real-time updates via Socket.io
-
-### Consultation History
-- List all consultations (past & present)
-- Search by student name, ID, or topic
-- Filter by status (All/Scheduled/Ongoing/Completed/Cancelled)
-- Detailed view with editable notes and remarks
-- Mark as completed
-- Update consultation status
-
-### Notifications Center
-- View all notifications with icons and colors by type
-- Unread indicator
-- Mark individual/all as read
-- Types: new_request, accepted, declined, cancelled, rescheduled, reminder, system
-- Real-time updates via Socket.io
-
-### Profile Management
-- Profile image upload (from gallery)
-- Edit personal information (name, email, department, office, hours)
-- Change password
-- View School ID
-- Logout
-
-## API Endpoints (All prefixed with /api)
-- Auth: POST /auth/login, POST /auth/change-password
-- Faculty: GET /faculty/profile, PATCH /faculty/profile, PATCH /faculty/availability
-- Dashboard: GET /dashboard/stats
-- Requests: GET /consultation-requests, POST /consultation-requests/{id}/action
-- Consultations: GET /consultations, GET /consultations/{id}, PATCH /consultations/{id}
-- Notifications: GET /notifications, PATCH /notifications/{id}/read, POST /notifications/mark-all-read
-- Seed: POST /seed (for testing)
+### Faculty Status Sync
+- Faculty toggles Available/Busy/Unavailable on mobile
+- Backend broadcasts `availability_changed` via Socket.IO
+- Kiosk grid updates (unavailable = disabled)
+- TV Display updates status strip color instantly
 
 ## Test Credentials
-- School ID: `FAC2024001`
-- Password: `password123`
-- Name: Dr. Maria Santos
-- Department: Computer Science
+- **Faculty**: `FAC2024001` through `FAC2024006` (all use password `password123`)
+- **Students**: `STU2024101` to `STU2024108` (for QR scanner testing)
 
-## Design System
-- **Colors**: White background, Blue (#2196F3) primary, Green/Orange/Red for status
-- **Typography**: System fonts with clear hierarchy (24pt titles, 16pt body, 14pt secondary)
-- **Spacing**: 8pt grid (8, 12, 16, 24, 32)
-- **Cards**: Rounded 12-16pt, soft shadows, elevation 2-4
-- **Icons**: @expo/vector-icons (Ionicons)
-- **Bottom Nav**: 5 tabs (Dashboard, Requests, History, Notifications, Profile)
+## API Endpoints Summary
 
-## Testing Results
-- ✅ 25/25 backend tests passed (100%)
-- ✅ Frontend UI verified with screenshots (Dashboard, History, Login all functional)
-- ✅ JWT authentication working
-- ✅ MongoDB serialization correct (no ObjectId errors)
+### Public (Kiosk/TV)
+- `GET /api/kiosk/faculty` – Faculty list with status
+- `GET /api/kiosk/students/{id}` – Student lookup
+- `POST /api/kiosk/students` – Upsert student
+- `POST /api/kiosk/consultation-request` – Submit request
+- `GET /api/kiosk/queue/{faculty_id}` – Faculty queue
+- `GET /api/tv-display/status` – TV dashboard data
+
+### Authenticated (Faculty App)
+- `POST /api/auth/login`, `POST /api/auth/change-password`
+- `GET/PATCH /api/faculty/profile`, `PATCH /api/faculty/availability`
+- `GET /api/dashboard/stats`
+- `GET/POST /api/consultation-requests` + `/action`
+- `GET/PATCH /api/consultations` + `/start` + `/complete`
+- `GET/PATCH /api/notifications`
+
+## Test Results
+- ✅ **50/50 backend tests passed** (auth, consultations, kiosk, queue, TV, start/complete, regression)
+- ✅ Frontend flows verified via screenshots (login → dashboard, kiosk complete flow, TV display)
+- ✅ End-to-end integration working: Kiosk request → Faculty accept → Start → TV updates
+- ✅ Real-time Socket.IO broadcasting `availability_changed`, `queue_updated`, `consultation_started/completed`, `new_consultation_request`
+
+## Deployment
+See `/app/RPI5_DEPLOYMENT.md` for complete step-by-step guide including:
+- MongoDB + Python + Chromium setup on RPi 5
+- systemd service for backend auto-start
+- nginx config to serve web build + proxy Socket.IO
+- Kiosk browser auto-launch scripts
+- USB QR scanner setup (works as HID keyboard)
+- Security hardening for production
