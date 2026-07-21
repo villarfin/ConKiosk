@@ -353,15 +353,17 @@ async def get_consultation_request(
     request_id: str,
     faculty = Depends(get_current_faculty)
 ):
-    from bson.objectid import ObjectId
+    obj_id = safe_object_id(request_id)
+    if not obj_id:
+        raise HTTPException(status_code=400, detail="Invalid request ID")
     request = await db.consultation_requests.find_one({
-        "_id": ObjectId(request_id),
+        "_id": obj_id,
         "faculty_school_id": faculty["school_id"]
     })
-    
+
     if not request:
         raise HTTPException(status_code=404, detail="Request not found")
-    
+
     return serialize_doc(request)
 
 @api_router.post("/consultation-requests/{request_id}/action")
@@ -370,24 +372,26 @@ async def handle_consultation_request(
     action: ConsultationAction,
     faculty = Depends(get_current_faculty)
 ):
-    from bson.objectid import ObjectId
-    
+    obj_id = safe_object_id(request_id)
+    if not obj_id:
+        raise HTTPException(status_code=400, detail="Invalid request ID")
+
     request = await db.consultation_requests.find_one({
-        "_id": ObjectId(request_id),
+        "_id": obj_id,
         "faculty_school_id": faculty["school_id"]
     })
-    
+
     if not request:
         raise HTTPException(status_code=404, detail="Request not found")
-    
+
     if action.action == "accept":
         # Update request status
         await db.consultation_requests.update_one(
-            {"_id": ObjectId(request_id)},
+            {"_id": obj_id},
             {"$set": {"status": "accepted"}}
         )
-        
-        # Create consultation record
+
+        # Create consultation record - carry over queue fields for kiosk-originated requests
         consultation = {
             "faculty_school_id": faculty["school_id"],
             "student_id": request["student_id"],
@@ -400,8 +404,16 @@ async def handle_consultation_request(
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
+        # Preserve queue linkage if this request came from the kiosk
+        if request.get("queue_id"):
+            consultation["queue_id"] = request["queue_id"]
+        if request.get("queue_number") is not None:
+            consultation["queue_number"] = request["queue_number"]
+        if request.get("consultation_type"):
+            consultation["consultation_type"] = request["consultation_type"]
+
         await db.consultations.insert_one(consultation)
-        
+
         # Create notification
         notification = {
             "faculty_school_id": faculty["school_id"],
@@ -412,21 +424,31 @@ async def handle_consultation_request(
             "created_at": datetime.utcnow()
         }
         await db.notifications.insert_one(notification)
-        
+
         # Emit real-time event
         await sio.emit('consultation_accepted', {
             'request_id': request_id,
             'student_id': request["student_id"]
         }, room=f"faculty_{faculty['school_id']}")
-        
+
         return {"message": "Request accepted", "status": "accepted"}
-    
+
     elif action.action == "decline":
         await db.consultation_requests.update_one(
-            {"_id": ObjectId(request_id)},
+            {"_id": obj_id},
             {"$set": {"status": "declined", "decline_reason": action.reason}}
         )
-        
+
+        # If this was a kiosk request with a queue entry, cancel it and notify
+        if request.get("queue_id"):
+            q_obj_id = safe_object_id(request["queue_id"])
+            if q_obj_id:
+                await db.queue.update_one(
+                    {"_id": q_obj_id},
+                    {"$set": {"status": "cancelled"}}
+                )
+                await sio.emit('queue_updated', {'faculty_id': faculty["school_id"]})
+
         # Create notification
         notification = {
             "faculty_school_id": faculty["school_id"],
@@ -437,24 +459,24 @@ async def handle_consultation_request(
             "created_at": datetime.utcnow()
         }
         await db.notifications.insert_one(notification)
-        
+
         return {"message": "Request declined", "status": "declined"}
-    
+
     elif action.action == "reschedule":
         if not action.reschedule_date or not action.reschedule_time:
             raise HTTPException(status_code=400, detail="Reschedule date and time required")
-        
+
         await db.consultation_requests.update_one(
-            {"_id": ObjectId(request_id)},
+            {"_id": obj_id},
             {"$set": {
                 "status": "rescheduled",
                 "preferred_date": action.reschedule_date,
                 "preferred_time": action.reschedule_time
             }}
         )
-        
+
         return {"message": "Request rescheduled", "status": "rescheduled"}
-    
+
     else:
         raise HTTPException(status_code=400, detail="Invalid action")
 
@@ -497,15 +519,17 @@ async def get_consultation(
     consultation_id: str,
     faculty = Depends(get_current_faculty)
 ):
-    from bson.objectid import ObjectId
+    obj_id = safe_object_id(consultation_id)
+    if not obj_id:
+        raise HTTPException(status_code=400, detail="Invalid consultation ID")
     consultation = await db.consultations.find_one({
-        "_id": ObjectId(consultation_id),
+        "_id": obj_id,
         "faculty_school_id": faculty["school_id"]
     })
-    
+
     if not consultation:
         raise HTTPException(status_code=404, detail="Consultation not found")
-    
+
     return serialize_doc(consultation)
 
 @api_router.patch("/consultations/{consultation_id}")
@@ -514,20 +538,22 @@ async def update_consultation(
     update: ConsultationUpdate,
     faculty = Depends(get_current_faculty)
 ):
-    from bson.objectid import ObjectId
-    
+    obj_id = safe_object_id(consultation_id)
+    if not obj_id:
+        raise HTTPException(status_code=400, detail="Invalid consultation ID")
+
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     update_data["updated_at"] = datetime.utcnow()
-    
+
     result = await db.consultations.update_one(
-        {"_id": ObjectId(consultation_id), "faculty_school_id": faculty["school_id"]},
+        {"_id": obj_id, "faculty_school_id": faculty["school_id"]},
         {"$set": update_data}
     )
-    
+
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Consultation not found")
-    
-    updated = await db.consultations.find_one({"_id": ObjectId(consultation_id)})
+
+    updated = await db.consultations.find_one({"_id": obj_id})
     return serialize_doc(updated)
 
 # ==================== Notifications Routes ====================
@@ -549,16 +575,18 @@ async def mark_notification_read(
     notification_id: str,
     faculty = Depends(get_current_faculty)
 ):
-    from bson.objectid import ObjectId
-    
+    obj_id = safe_object_id(notification_id)
+    if not obj_id:
+        raise HTTPException(status_code=400, detail="Invalid notification ID")
+
     result = await db.notifications.update_one(
-        {"_id": ObjectId(notification_id), "faculty_school_id": faculty["school_id"]},
+        {"_id": obj_id, "faculty_school_id": faculty["school_id"]},
         {"$set": {"read": True}}
     )
-    
+
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Notification not found")
-    
+
     return {"message": "Notification marked as read"}
 
 @api_router.post("/notifications/mark-all-read")
