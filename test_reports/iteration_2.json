@@ -1,0 +1,58 @@
+{
+  "summary": "Backend-only testing for NEW ConKiosk endpoints (kiosk, queue, TV display, start/complete). Executed 16 pytest cases in /app/backend/tests/test_kiosk_queue_api.py: 15 PASSED, 1 FAILED. Verified GET /api/kiosk/faculty (public, no auth, returns 6 faculty, no _id/password_hash leak), GET /api/kiosk/students/{id} (200 for STU2024101, 404 for unknown), POST /api/kiosk/students (create + update paths, persisted via GET), POST /api/kiosk/consultation-request (404 for unknown faculty; queue numbers correctly increment 1,2,3 for a fresh faculty; group consultation stores multiple student_ids/names, upserts new students, creates consultation_request with queue_number/queue_id and 'Kiosk' notification), GET /api/kiosk/queue/{faculty_id} (returns waiting entries sorted by queue_number), GET /api/tv-display/status (returns all 6 faculty; now_serving/waiting_count/next_queue_numbers correct against seed for FAC2024002/003/001), POST /consultations/{id}/start (sets consultation='ongoing' and faculty='busy'; 400 for malformed id; 404 for valid-but-missing ObjectId), POST /consultations/{id}/complete (sets 'completed', faculty back to 'available', returns duration_minutes; 400 for malformed id). Faculty auth regression: login + /faculty/profile + /dashboard/stats still work. DB re-seeded at the end so state is clean.\n\nONE HIGH-PRIORITY BUG FOUND: POST /api/consultation-requests/{request_id}/action returns 500 (not 400) when request_id is a malformed ObjectId. The problem statement explicitly requires this endpoint to use safe_object_id and return 400 — the helper exists but was NOT applied to this handler.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/consultation-requests/{request_id}/action",
+        "issue": "Passing a malformed ObjectId (e.g. 'not-a-valid-id') returns 500 Internal Server Error instead of 400. server.py line 373 calls ObjectId(request_id) directly without using safe_object_id. Requirement in review scope was for this endpoint to return 400. Fix: replace `ObjectId(request_id)` in handle_consultation_request (and ideally get_consultation_request at line 358) with the safe_object_id helper and raise 400 when None.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/consultation-requests/{request_id}/action (accept branch)",
+        "issue": "When accepting a kiosk-originated request, the created consultation record does NOT copy queue_id / queue_number / consultation_type from the request. Because start/complete only update the queue when consultation.queue_id is set, accepting a kiosk request then starting/completing the consultation will NOT transition the linked queue entry to serving/completed. Fix: on accept, propagate queue_id, queue_number, consultation_type onto the new consultation doc."
+      },
+      {
+        "endpoint": "GET /api/consultation-requests/{request_id}, GET /api/consultations/{consultation_id}, PATCH /api/consultations/{consultation_id}, PATCH /api/notifications/{notification_id}/read",
+        "issue": "These handlers still call ObjectId(...) directly. A malformed id will yield 500 instead of 400/404. Consistency issue with the newly-added safe_object_id helper."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_conkiosk_api.py",
+    "/app/backend/tests/test_kiosk_queue_api.py",
+    "/app/test_reports/pytest/pytest_kiosk_results.xml"
+  ],
+  "action_items": [
+    "HIGH: Apply safe_object_id in handle_consultation_request (POST /api/consultation-requests/{request_id}/action) so malformed IDs return 400. Also apply to get_consultation_request, get_consultation, update_consultation, mark_notification_read for consistency.",
+    "MEDIUM: When accepting a consultation request (accept branch), copy queue_id, queue_number, and consultation_type from the request into the new consultation doc, so faculty-driven /start and /complete correctly update the linked queue entry (serving → completed) and the TV display.",
+    "LOW (from iter 1, still open): Split server.py into routers; move `from bson.objectid import ObjectId` to top; enforce JWT_SECRET_KEY presence; guard POST /api/seed behind an env flag before production."
+  ],
+  "critical_code_review_comments": [
+    "safe_object_id helper is defined but only used in start/complete. All other handlers that parse ObjectId still crash on bad input.",
+    "server.py is >1000 lines — should be split into routers (auth, faculty, consultations, kiosk, tv, notifications).",
+    "Accept flow drops kiosk queue linkage (queue_id/queue_number not copied to consultation) → start/complete cannot update queue for kiosk-originated flows.",
+    "Faculty availability is auto-flipped to busy/available on start/complete without checking whether the faculty had explicitly set 'unavailable' — may override manual status. Consider only flipping if current status is not 'unavailable'.",
+    "consultation_type default value in seed queue entries is 'individual' — model has no server-side enum validation (any string accepted)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_kiosk_queue_api.py (created)"
+  ],
+  "success_rate": {
+    "backend": "93.75% (15/16 new tests); combined with iter 1: 40/41 = 97.6%",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "POST /api/seed called multiple times during tests and once at the end. Final DB state: 6 faculty (FAC2024001-006, all password123), 8 students (STU2024101-108), 3 pending consultation requests for FAC2024001, 2 completed consultations, 3 queue entries (FAC2024002 has 1 serving + 1 waiting; FAC2024003 has 1 waiting), 2 notifications.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend base URL: EXPO_PUBLIC_BACKEND_URL from /app/frontend/.env. Auth: FAC2024001/password123 (FAC2024001-006 all use password123). Kiosk endpoints are public. All 15 new kiosk/queue/TV tests + 25 iter-1 auth/consultation tests are green. The one open backend bug is the malformed-ObjectId handling on /consultation-requests/{id}/action (returns 500). After main agent applies safe_object_id fix, re-run /app/backend/tests/test_kiosk_queue_api.py::TestStartComplete::test_action_invalid_id_returns_400 to confirm.",
+  "rca_of_issue": "Bug: POST /api/consultation-requests/{id}/action returns 500 on malformed id. RCA: server.py line 373 imports and calls `ObjectId(request_id)` directly inside handle_consultation_request. When request_id is not a 24-char hex string, bson.errors.InvalidId is raised and FastAPI returns 500. The newly-added safe_object_id helper (line 575) is only wired into start_consultation and complete_consultation. Reproduction: `curl -X POST $URL/api/consultation-requests/not-a-valid-id/action -H 'Authorization: Bearer <token>' -H 'Content-Type: application/json' -d '{\"action\":\"accept\"}'` → 500. Fix: replace the direct ObjectId() call with `obj_id = safe_object_id(request_id); if not obj_id: raise HTTPException(400, 'Invalid request ID')` and use obj_id in the subsequent find_one/update_one calls. Apply the same pattern to other handlers listed under minor issues."
+}

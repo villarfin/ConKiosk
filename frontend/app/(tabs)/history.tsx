@@ -126,6 +126,36 @@ export default function HistoryScreen() {
     setEditStatus('completed');
   };
 
+  const startConsultation = async () => {
+    if (!selectedConsultation) return;
+    setSaving(true);
+    try {
+      await ApiClient.post(`/consultations/${selectedConsultation._id}/start`);
+      Alert.alert('Success', 'Consultation started. Status set to Busy.');
+      closeDetails();
+      loadHistory();
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to start consultation');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const completeConsultation = async () => {
+    if (!selectedConsultation) return;
+    setSaving(true);
+    try {
+      await ApiClient.post(`/consultations/${selectedConsultation._id}/complete`);
+      Alert.alert('Success', 'Consultation completed. Queue advanced.');
+      closeDetails();
+      loadHistory();
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to complete consultation');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'scheduled':
@@ -353,7 +383,31 @@ export default function HistoryScreen() {
                     />
                   </View>
 
-                  {selectedConsultation.status !== 'completed' && (
+                  {selectedConsultation.status === 'scheduled' && (
+                    <TouchableOpacity
+                      testID="start-consultation-btn"
+                      style={[styles.completeButton, { backgroundColor: '#FFF3E0' }]}
+                      onPress={startConsultation}
+                      disabled={saving}
+                    >
+                      <Ionicons name="play-circle" size={20} color="#FF9800" />
+                      <Text style={[styles.completeButtonText, { color: '#FF9800' }]}>Start Consultation (Auto-set Busy)</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {selectedConsultation.status === 'ongoing' && (
+                    <TouchableOpacity
+                      testID="complete-consultation-btn"
+                      style={styles.completeButton}
+                      onPress={completeConsultation}
+                      disabled={saving}
+                    >
+                      <Ionicons name="checkmark-done" size={20} color="#4CAF50" />
+                      <Text style={styles.completeButtonText}>Complete & Advance Queue</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {selectedConsultation.status !== 'completed' && selectedConsultation.status !== 'ongoing' && selectedConsultation.status !== 'scheduled' && (
                     <TouchableOpacity
                       style={styles.completeButton}
                       onPress={markAsCompleted}
