@@ -17,9 +17,40 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
+// USTP–CDO programs recognized from QR content. The text shown to the student
+// is the standardized value on the right; the values on the left are QR forms.
+const QR_PROGRAMS: Array<[string, string]> = [
+  ['SHS STEM', 'SHS STEM'], ['STEM', 'SHS STEM'],
+  ['BS INFORMATION TECHNOLOGY', 'BS Information Technology'], ['BSIT', 'BS Information Technology'],
+  ['BS COMPUTER SCIENCE', 'BS Computer Science'], ['BSCS', 'BS Computer Science'],
+  ['BS DATA SCIENCE', 'BS Data Science'],
+  ['BS COMPUTER ENGINEERING', 'BS Computer Engineering'], ['BSCPE', 'BS Computer Engineering'],
+  ['BS CIVIL ENGINEERING', 'BS Civil Engineering'], ['BSCE', 'BS Civil Engineering'],
+  ['BS ELECTRICAL ENGINEERING', 'BS Electrical Engineering'], ['BSEE', 'BS Electrical Engineering'],
+  ['BS ELECTRONICS ENGINEERING', 'BS Electronics Engineering'], ['BSECE', 'BS Electronics Engineering'],
+  ['BS MECHANICAL ENGINEERING', 'BS Mechanical Engineering'], ['BSME', 'BS Mechanical Engineering'],
+  ['BS ARCHITECTURE', 'BS Architecture'], ['BS APPLIED MATHEMATICS', 'BS Applied Mathematics'],
+  ['BS APPLIED PHYSICS', 'BS Applied Physics'], ['BS CHEMISTRY', 'BS Chemistry'],
+  ['BS ENVIRONMENTAL SCIENCE', 'BS Environmental Science'], ['BS FOOD TECHNOLOGY', 'BS Food Technology'],
+  ['BS GEODETIC ENGINEERING', 'BS Geodetic Engineering'],
+  ['BS TECHNOLOGY COMMUNICATION MANAGEMENT', 'BS Technology Communication Management'],
+  ['BS AUTOTRONICS', 'BS Autotronics'], ['BS ELECTRONICS TECHNOLOGY', 'BS Electronics Technology'],
+  ['BS ENERGY SYSTEMS AND MANAGEMENT', 'BS Energy Systems and Management'],
+  ['BS ELECTRO-MECHANICAL TECHNOLOGY', 'BS Electro-Mechanical Technology'],
+  ['BS MANUFACTURING ENGINEERING TECHNOLOGY', 'BS Manufacturing Engineering Technology'],
+  ['BSED SCIENCE', 'BSEd Science'], ['BSED MATHEMATICS', 'BSEd Mathematics'],
+  ['BTLE', 'BTLE'], ['BTVTE', 'BTVTE'],
+];
+
+const detectProgram = (qrContent: string) => {
+  const normalizedContent = qrContent.toUpperCase();
+  return QR_PROGRAMS.find(([qrValue]) => normalizedContent.includes(qrValue))?.[1] || '';
+};
+
 interface Student {
   student_id: string;
   full_name: string;
+  program: string;
   year_level: string;
   section: string;
 }
@@ -38,12 +69,20 @@ export default function IdentifyScreen() {
   const [currentStudent, setCurrentStudent] = useState<Student>({
     student_id: '',
     full_name: '',
+    program: '',
     year_level: '',
     section: '',
   });
   const [scanInput, setScanInput] = useState('');
   const [lookingUp, setLookingUp] = useState(false);
   const scanInputRef = useRef<TextInput>(null);
+  const scanBufferRef = useRef('');
+  const isScanInputFocusedRef = useRef(false);
+  const hasMissingRequiredInfo = !currentStudent.student_id.trim()
+    || !currentStudent.full_name.trim()
+    || !currentStudent.program.trim()
+    || !currentStudent.year_level.trim()
+    || !currentStudent.section.trim();
 
   // Keep QR scanner input focused (USB QR scanner acts like keyboard)
   useEffect(() => {
@@ -51,24 +90,54 @@ export default function IdentifyScreen() {
     return () => clearTimeout(t);
   }, []);
 
-  const handleScannedId = async (id: string) => {
-    if (!id.trim()) return;
+  const handleScannedId = async (scanValue: string) => {
+    const normalizedScan = scanValue.replace(/\s+/g, ' ').trim();
+    if (!normalizedScan) return;
+
+    // School ID QR codes can contain several values, e.g.
+    // "STUDENT NAME STU2024101 BSIT" or "STUDENT NAME 2021304481 BSIT".
+    // Support both the school's STU-prefixed IDs and numeric IDs.
+    const idMatch = normalizedScan.match(/\b(?:(?:STU)[- ]?|[A-Za-z]{2,5}(?=\d))?\d{7,12}\b/i);
+    const studentId = idMatch?.[0] || normalizedScan;
+    const scannedName = idMatch
+      ? normalizedScan.slice(0, idMatch.index).trim()
+      : '';
+    const scannedProgram = detectProgram(normalizedScan);
+
     setLookingUp(true);
     try {
-      const response = await fetch(`${BACKEND_URL}/api/kiosk/students/${id.trim()}`);
+      const response = await fetch(`${BACKEND_URL}/api/kiosk/students/${studentId}`);
       if (response.ok) {
         const student: Student = await response.json();
-        setCurrentStudent(student);
+        // Scanning only verifies identity. These are required for the current request.
+        setCurrentStudent({
+          ...student,
+          // Supports existing student records created before Program was added.
+          program: student.program || scannedProgram || student.section?.split('-')[0] || '',
+          year_level: '',
+          section: '',
+        });
       } else {
-        // Not found - just fill the ID and let user complete manually
-        setCurrentStudent({ ...currentStudent, student_id: id.trim() });
-        Alert.alert('Student Not Found', 'Please enter your information manually');
+        // Not found - retain every useful value from a school-ID QR and let
+        // the student complete any remaining required fields manually.
+        setCurrentStudent({
+          student_id: studentId,
+          full_name: scannedName,
+          program: scannedProgram,
+          year_level: '',
+          section: '',
+        });
+        Alert.alert(
+          'Student Not Found',
+          'Your ID and available QR details were filled in. Please complete the remaining information manually.'
+        );
       }
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Failed to lookup student');
     } finally {
       setLookingUp(false);
       setScanInput('');
+      scanBufferRef.current = '';
       // Refocus for next scan
       setTimeout(() => scanInputRef.current?.focus(), 100);
     }
@@ -78,8 +147,50 @@ export default function IdentifyScreen() {
     handleScannedId(scanInput);
   };
 
+  // USB QR scanners behave as keyboards. Some school IDs contain Tab
+  // separators; on the web, those would normally move focus through the form.
+  // Capture the full stream while the QR field is focused, then process it
+  // when the scanner sends Enter.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+
+    const handleScannerKey = (event: KeyboardEvent) => {
+      if (!isScanInputFocusedRef.current || event.ctrlKey || event.metaKey || event.altKey) return;
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const value = scanBufferRef.current;
+        if (value.trim()) handleScannedId(value);
+        return;
+      }
+
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        scanBufferRef.current += ' ';
+        setScanInput(scanBufferRef.current);
+        return;
+      }
+
+      if (event.key === 'Backspace') {
+        event.preventDefault();
+        scanBufferRef.current = scanBufferRef.current.slice(0, -1);
+        setScanInput(scanBufferRef.current);
+        return;
+      }
+
+      if (event.key.length === 1) {
+        event.preventDefault();
+        scanBufferRef.current += event.key;
+        setScanInput(scanBufferRef.current);
+      }
+    };
+
+    window.addEventListener('keydown', handleScannerKey, true);
+    return () => window.removeEventListener('keydown', handleScannerKey, true);
+  });
+
   const addStudent = async () => {
-    if (!currentStudent.student_id || !currentStudent.full_name || !currentStudent.year_level || !currentStudent.section) {
+    if (!currentStudent.student_id || !currentStudent.full_name || !currentStudent.program || !currentStudent.year_level || !currentStudent.section) {
       Alert.alert('Missing Info', 'Please fill in all student details');
       return;
     }
@@ -91,12 +202,12 @@ export default function IdentifyScreen() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(currentStudent),
       });
-    } catch (e) {
+    } catch {
       // Non-critical - continue anyway
     }
 
     setStudents([...students, currentStudent]);
-    setCurrentStudent({ student_id: '', full_name: '', year_level: '', section: '' });
+    setCurrentStudent({ student_id: '', full_name: '', program: '', year_level: '', section: '' });
     setTimeout(() => scanInputRef.current?.focus(), 100);
   };
 
@@ -107,11 +218,17 @@ export default function IdentifyScreen() {
   const handleContinue = () => {
     let allStudents = [...students];
 
-    // If current form is filled but not added yet, add it
-    if (currentStudent.student_id && currentStudent.full_name) {
-      if (currentStudent.year_level && currentStudent.section) {
-        allStudents.push(currentStudent);
-      }
+    const hasCurrentStudentData = Object.values(currentStudent).some((value) => value.trim());
+    const currentStudentComplete = Object.values(currentStudent).every((value) => value.trim());
+
+    if (hasCurrentStudentData && !currentStudentComplete) {
+      Alert.alert('Missing Info', 'Please fill in Program, Year Level, and Section before continuing.');
+      return;
+    }
+
+    // If current form is complete but not added yet, add it.
+    if (currentStudentComplete) {
+      allStudents.push(currentStudent);
     }
 
     if (allStudents.length === 0) {
@@ -185,16 +302,24 @@ export default function IdentifyScreen() {
                 <Text style={styles.scanTitle}>Scan Your ID or Enter Manually</Text>
               </View>
               <Text style={styles.scanHint}>
-                Scan the QR code on your university ID, or fill in the fields below.
+                Scan your university ID QR code, or fill in the fields below.
               </Text>
               <TextInput
                 ref={scanInputRef}
                 testID="qr-scan-input"
                 style={styles.scanInput}
-                placeholder="Scan QR here or type Student ID and press Enter"
+                placeholder="Scan student QR or type Student ID and press Enter"
                 value={scanInput}
-                onChangeText={setScanInput}
+                onChangeText={(value) => {
+                  scanBufferRef.current = value;
+                  setScanInput(value);
+                }}
                 onSubmitEditing={handleScanSubmit}
+                onFocus={() => {
+                  isScanInputFocusedRef.current = true;
+                  scanBufferRef.current = scanInput;
+                }}
+                onBlur={() => { isScanInputFocusedRef.current = false; }}
                 autoFocus
                 blurOnSubmit={false}
               />
@@ -215,23 +340,38 @@ export default function IdentifyScreen() {
               <Text style={styles.inputLabel}>Student ID Number</Text>
               <TextInput
                 testID="input-student-id"
-                style={styles.input}
+                style={[styles.input, !currentStudent.student_id.trim() && styles.inputError]}
                 placeholder="e.g., STU2024101"
                 value={currentStudent.student_id}
                 onChangeText={(v) => setCurrentStudent({ ...currentStudent, student_id: v })}
                 autoCapitalize="characters"
               />
+              {!currentStudent.student_id.trim() && <Text style={styles.fieldRequiredText}>Student ID Number is required.</Text>}
             </View>
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Full Name</Text>
               <TextInput
                 testID="input-full-name"
-                style={styles.input}
+                style={[styles.input, !currentStudent.full_name.trim() && styles.inputError]}
                 placeholder="e.g., John Dela Cruz"
                 value={currentStudent.full_name}
                 onChangeText={(v) => setCurrentStudent({ ...currentStudent, full_name: v })}
               />
+              {!currentStudent.full_name.trim() && <Text style={styles.fieldRequiredText}>Full Name is required.</Text>}
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Program</Text>
+              <TextInput
+                testID="input-program"
+                style={[styles.input, !currentStudent.program.trim() && styles.inputError]}
+                placeholder="e.g., BSCS"
+                value={currentStudent.program}
+                onChangeText={(v) => setCurrentStudent({ ...currentStudent, program: v })}
+                autoCapitalize="characters"
+              />
+              {!currentStudent.program.trim() && <Text style={styles.fieldRequiredText}>Program is required.</Text>}
             </View>
 
             <View style={styles.row}>
@@ -239,24 +379,35 @@ export default function IdentifyScreen() {
                 <Text style={styles.inputLabel}>Year Level</Text>
                 <TextInput
                   testID="input-year-level"
-                  style={styles.input}
+                  style={[styles.input, !currentStudent.year_level.trim() && styles.inputError]}
                   placeholder="e.g., 3rd Year"
                   value={currentStudent.year_level}
                   onChangeText={(v) => setCurrentStudent({ ...currentStudent, year_level: v })}
                 />
+                {!currentStudent.year_level.trim() && <Text style={styles.fieldRequiredText}>Year Level is required.</Text>}
               </View>
               <View style={[styles.inputGroup, { flex: 1 }]}>
                 <Text style={styles.inputLabel}>Section</Text>
                 <TextInput
                   testID="input-section"
-                  style={styles.input}
+                  style={[styles.input, !currentStudent.section.trim() && styles.inputError]}
                   placeholder="e.g., BSCS-3A"
                   value={currentStudent.section}
                   onChangeText={(v) => setCurrentStudent({ ...currentStudent, section: v })}
                   autoCapitalize="characters"
                 />
+                {!currentStudent.section.trim() && <Text style={styles.fieldRequiredText}>Section is required.</Text>}
               </View>
             </View>
+
+            {hasMissingRequiredInfo && (
+              <View style={styles.requiredWarning}>
+                <Ionicons name="alert-circle-outline" size={16} color="#C62828" />
+                <Text style={styles.requiredWarningText}>
+                  Complete all fields before continuing. Year Level and Section are required after scanning.
+                </Text>
+              </View>
+            )}
 
             {consultationType === 'group' && (
               <TouchableOpacity testID="add-student-btn" style={styles.addStudentBtn} onPress={addStudent}>
@@ -274,7 +425,7 @@ export default function IdentifyScreen() {
                 <View key={i} style={styles.studentChip}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.chipName}>{s.full_name}</Text>
-                    <Text style={styles.chipDetails}>{s.student_id} • {s.year_level} - {s.section}</Text>
+                    <Text style={styles.chipDetails}>{s.student_id} • {s.program} • {s.year_level} - {s.section}</Text>
                   </View>
                   <TouchableOpacity onPress={() => removeStudent(i)}>
                     <Ionicons name="close-circle" size={22} color="#F44336" />
@@ -366,6 +517,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E0E0E0',
   },
+  inputError: { borderColor: '#C62828', borderWidth: 1.5 },
+  fieldRequiredText: { color: '#C62828', fontSize: 11, marginTop: 4 },
+  requiredWarning: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#FFEBEE', borderRadius: 8, padding: 10, marginTop: -2, marginBottom: 12,
+  },
+  requiredWarningText: { flex: 1, color: '#C62828', fontSize: 12, lineHeight: 17 },
   row: { flexDirection: 'row', gap: 12 },
   addStudentBtn: {
     flexDirection: 'row',

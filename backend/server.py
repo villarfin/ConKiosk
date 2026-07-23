@@ -123,6 +123,8 @@ class ChangePasswordRequest(BaseModel):
 class Student(BaseModel):
     student_id: str
     full_name: str
+    # Kept optional for older kiosk clients; the current kiosk requires it.
+    program: str = ""
     year_level: str
     section: str
 
@@ -635,6 +637,7 @@ async def lookup_student(student_id: str):
     return {
         "student_id": student["student_id"],
         "full_name": student["full_name"],
+        "program": student.get("program", student.get("section", "").split("-")[0]),
         "year_level": student["year_level"],
         "section": student["section"]
     }
@@ -697,7 +700,10 @@ async def submit_kiosk_request(request: KioskConsultationRequest):
         "faculty_school_id": request.faculty_school_id,
         "student_id": ",".join(student_ids),
         "student_name": display_name,
-        "student_program": f"{request.students[0].year_level} - {request.students[0].section}",
+            "student_program": " • ".join(filter(None, [
+                request.students[0].program,
+                f"{request.students[0].year_level} - {request.students[0].section}",
+            ])),
         "topic": request.topic,
         "preferred_date": datetime.utcnow().date().isoformat(),
         "preferred_time": "Walk-in",
@@ -962,14 +968,14 @@ async def seed_database():
 
     # Create sample students
     students = [
-        {"student_id": "STU2024101", "full_name": "John Dela Cruz", "year_level": "4th Year", "section": "BSCS-4A"},
-        {"student_id": "STU2024102", "full_name": "Sarah Reyes", "year_level": "3rd Year", "section": "BSIT-3B"},
-        {"student_id": "STU2024103", "full_name": "Miguel Torres", "year_level": "4th Year", "section": "BSCS-4A"},
-        {"student_id": "STU2024104", "full_name": "Anna Garcia", "year_level": "4th Year", "section": "BSCS-4B"},
-        {"student_id": "STU2024105", "full_name": "Carlos Ramos", "year_level": "2nd Year", "section": "BSIT-2A"},
-        {"student_id": "STU2024106", "full_name": "Lucia Fernandez", "year_level": "3rd Year", "section": "BSCS-3A"},
-        {"student_id": "STU2024107", "full_name": "Diego Morales", "year_level": "1st Year", "section": "BSIT-1B"},
-        {"student_id": "STU2024108", "full_name": "Isabella Cruz", "year_level": "4th Year", "section": "BSBA-4A"}
+        {"student_id": "STU2024101", "full_name": "John Dela Cruz", "program": "BSCS", "year_level": "4th Year", "section": "BSCS-4A"},
+        {"student_id": "STU2024102", "full_name": "Sarah Reyes", "program": "BSIT", "year_level": "3rd Year", "section": "BSIT-3B"},
+        {"student_id": "STU2024103", "full_name": "Miguel Torres", "program": "BSCS", "year_level": "4th Year", "section": "BSCS-4A"},
+        {"student_id": "STU2024104", "full_name": "Anna Garcia", "program": "BSCS", "year_level": "4th Year", "section": "BSCS-4B"},
+        {"student_id": "STU2024105", "full_name": "Carlos Ramos", "program": "BSIT", "year_level": "2nd Year", "section": "BSIT-2A"},
+        {"student_id": "STU2024106", "full_name": "Lucia Fernandez", "program": "BSCS", "year_level": "3rd Year", "section": "BSCS-3A"},
+        {"student_id": "STU2024107", "full_name": "Diego Morales", "program": "BSIT", "year_level": "1st Year", "section": "BSIT-1B"},
+        {"student_id": "STU2024108", "full_name": "Isabella Cruz", "program": "BSBA", "year_level": "4th Year", "section": "BSBA-4A"}
     ]
     await db.students.insert_many(students)
 

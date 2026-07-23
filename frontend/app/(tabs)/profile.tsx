@@ -38,6 +38,9 @@ export default function ProfileScreen() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const isProfileIncomplete = !editName.trim() || !editEmail.trim() || !editDepartment.trim()
+    || !editOffice.trim() || !editOfficeHours.trim();
+  const isPasswordIncomplete = !currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim();
 
   const pickImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -94,6 +97,10 @@ export default function ProfileScreen() {
   };
 
   const saveProfile = async () => {
+    if (isProfileIncomplete) {
+      Alert.alert('Missing Information', 'Please complete all profile fields.');
+      return;
+    }
     setSaving(true);
     try {
       const updated = await ApiClient.patch('/faculty/profile', {
@@ -115,6 +122,10 @@ export default function ProfileScreen() {
   };
 
   const changePassword = async () => {
+    if (isPasswordIncomplete) {
+      Alert.alert('Missing Information', 'Please complete all password fields.');
+      return;
+    }
     if (newPassword !== confirmPassword) {
       Alert.alert('Error', 'New passwords do not match');
       return;
@@ -300,53 +311,58 @@ export default function ProfileScreen() {
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Full Name</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, !editName.trim() && styles.inputError]}
                   value={editName}
                   onChangeText={setEditName}
                   placeholder="Enter your full name"
                 />
+                {!editName.trim() && <Text style={styles.fieldRequiredText}>Full Name is required.</Text>}
               </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Email</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, !editEmail.trim() && styles.inputError]}
                   value={editEmail}
                   onChangeText={setEditEmail}
                   placeholder="Enter your email"
                   keyboardType="email-address"
                   autoCapitalize="none"
                 />
+                {!editEmail.trim() && <Text style={styles.fieldRequiredText}>Email is required.</Text>}
               </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Department</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, !editDepartment.trim() && styles.inputError]}
                   value={editDepartment}
                   onChangeText={setEditDepartment}
                   placeholder="Enter your department"
                 />
+                {!editDepartment.trim() && <Text style={styles.fieldRequiredText}>Department is required.</Text>}
               </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Office Location</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, !editOffice.trim() && styles.inputError]}
                   value={editOffice}
                   onChangeText={setEditOffice}
                   placeholder="e.g., Room 301, Science Building"
                 />
+                {!editOffice.trim() && <Text style={styles.fieldRequiredText}>Office Location is required.</Text>}
               </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Office Hours</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, !editOfficeHours.trim() && styles.inputError]}
                   value={editOfficeHours}
                   onChangeText={setEditOfficeHours}
                   placeholder="e.g., Mon-Fri 9:00 AM - 5:00 PM"
                 />
+                {!editOfficeHours.trim() && <Text style={styles.fieldRequiredText}>Office Hours is required.</Text>}
               </View>
 
               <TouchableOpacity
@@ -388,34 +404,37 @@ export default function ProfileScreen() {
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Current Password</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, !currentPassword.trim() && styles.inputError]}
                   value={currentPassword}
                   onChangeText={setCurrentPassword}
                   placeholder="Enter current password"
                   secureTextEntry
                 />
+                {!currentPassword.trim() && <Text style={styles.fieldRequiredText}>Current Password is required.</Text>}
               </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>New Password</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, !newPassword.trim() && styles.inputError]}
                   value={newPassword}
                   onChangeText={setNewPassword}
                   placeholder="Enter new password"
                   secureTextEntry
                 />
+                {!newPassword.trim() && <Text style={styles.fieldRequiredText}>New Password is required.</Text>}
               </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Confirm New Password</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, !confirmPassword.trim() && styles.inputError]}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
                   placeholder="Confirm new password"
                   secureTextEntry
                 />
+                {!confirmPassword.trim() && <Text style={styles.fieldRequiredText}>Confirm New Password is required.</Text>}
               </View>
 
               <TouchableOpacity
@@ -636,6 +655,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E0E0E0',
   },
+  inputError: { borderColor: '#C62828', borderWidth: 1.5 },
+  fieldRequiredText: { color: '#C62828', fontSize: 11, marginTop: 4 },
   saveButton: {
     backgroundColor: '#2196F3',
     padding: 16,

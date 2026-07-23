@@ -20,6 +20,7 @@ const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 interface Student {
   student_id: string;
   full_name: string;
+  program: string;
   year_level: string;
   section: string;
 }
@@ -119,7 +120,7 @@ export default function RequestScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.studentName}>{s.full_name}</Text>
-                  <Text style={styles.studentMeta}>{s.student_id} • {s.year_level} - {s.section}</Text>
+                  <Text style={styles.studentMeta}>{s.student_id} • {s.program} • {s.year_level} - {s.section}</Text>
                 </View>
               </View>
             ))}
@@ -131,7 +132,7 @@ export default function RequestScreen() {
             <Text style={styles.hint}>What would you like to discuss with the faculty?</Text>
             <TextInput
               testID="input-topic"
-              style={styles.topicInput}
+              style={[styles.topicInput, !topic.trim() && styles.topicInputError]}
               placeholder="e.g., Discussion on thesis chapter 3, Programming assignment help..."
               value={topic}
               onChangeText={setTopic}
@@ -140,6 +141,7 @@ export default function RequestScreen() {
               textAlignVertical="top"
               maxLength={300}
             />
+            {!topic.trim() && <Text style={styles.fieldRequiredText}>Consultation Topic is required.</Text>}
             <Text style={styles.charCount}>{topic.length}/300</Text>
           </View>
         </ScrollView>
@@ -241,6 +243,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E0E0E0',
   },
+  topicInputError: { borderColor: '#C62828', borderWidth: 1.5 },
+  fieldRequiredText: { color: '#C62828', fontSize: 11, marginTop: 4 },
   charCount: { textAlign: 'right', color: '#999', fontSize: 11, marginTop: 4 },
   footer: {
     padding: 16,

@@ -70,7 +70,7 @@ export default function LoginScreen() {
             {/* School ID Input */}
             <View style={styles.inputContainer}>
               <Text style={styles.label}>School ID Number</Text>
-              <View style={styles.inputWrapper}>
+              <View style={[styles.inputWrapper, !schoolId.trim() && styles.inputWrapperError]}>
                 <Ionicons name="person-outline" size={20} color="#666" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
@@ -82,12 +82,13 @@ export default function LoginScreen() {
                   editable={!loading}
                 />
               </View>
+              {!schoolId.trim() && <Text style={styles.fieldRequiredText}>School ID Number is required.</Text>}
             </View>
 
             {/* Password Input */}
             <View style={styles.inputContainer}>
               <Text style={styles.label}>Password</Text>
-              <View style={styles.inputWrapper}>
+              <View style={[styles.inputWrapper, !password.trim() && styles.inputWrapperError]}>
                 <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
@@ -110,6 +111,7 @@ export default function LoginScreen() {
                   />
                 </TouchableOpacity>
               </View>
+              {!password.trim() && <Text style={styles.fieldRequiredText}>Password is required.</Text>}
             </View>
 
             {/* Login Button */}
@@ -204,6 +206,8 @@ const styles = StyleSheet.create({
     borderColor: '#E0E0E0',
     paddingHorizontal: 12,
   },
+  inputWrapperError: { borderColor: '#C62828', borderWidth: 1.5 },
+  fieldRequiredText: { color: '#C62828', fontSize: 11, marginTop: 4 },
   inputIcon: {
     marginRight: 8,
   },
