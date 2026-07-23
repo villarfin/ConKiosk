@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { storage } from '@/src/utils/storage';
-import io, { Socket } from 'socket.io-client';
+import { RealtimeClient } from '@/src/utils/realtime';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -23,7 +23,7 @@ interface AuthContextType {
   login: (schoolId: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   updateFaculty: (updatedFaculty: Faculty) => void;
-  socket: Socket | null;
+  realtime: RealtimeClient | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -32,36 +32,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [faculty, setFaculty] = useState<Faculty | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const [realtime, setRealtime] = useState<RealtimeClient | null>(null);
 
   // Initialize auth state from storage
   useEffect(() => {
     initializeAuth();
   }, []);
 
-  // Setup Socket.IO when authenticated
+  // Faculty-specific notifications use the native WebSocket endpoint.
   useEffect(() => {
-    if (isAuthenticated && faculty && !socket) {
-      const newSocket = io(BACKEND_URL, {
-        transports: ['websocket', 'polling'],
-      });
-
-      newSocket.on('connect', () => {
-        console.log('Socket connected');
-        newSocket.emit('join_faculty_room', { school_id: faculty.school_id });
-      });
-
-      newSocket.on('disconnect', () => {
-        console.log('Socket disconnected');
-      });
-
-      setSocket(newSocket);
+    if (isAuthenticated && faculty && token && !realtime) {
+      const client = new RealtimeClient(faculty.school_id, token);
+      client.connect();
+      setRealtime(client);
 
       return () => {
-        newSocket.disconnect();
+        client.disconnect();
       };
     }
-  }, [isAuthenticated, faculty]);
+  }, [isAuthenticated, faculty?.school_id, token]);
 
   const initializeAuth = async () => {
     try {
@@ -116,9 +105,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await storage.secureRemove('auth_token');
       await storage.removeItem('faculty_data');
 
-      if (socket) {
-        socket.disconnect();
-        setSocket(null);
+      if (realtime) {
+        realtime.disconnect();
+        setRealtime(null);
       }
 
       setToken(null);
@@ -143,7 +132,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         logout,
         updateFaculty,
-        socket,
+        realtime,
       }}
     >
       {children}

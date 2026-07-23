@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import io, { Socket } from 'socket.io-client';
+import { RealtimeClient } from '@/src/utils/realtime';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -48,15 +48,13 @@ export default function TVDisplay() {
   }, [loadData]);
 
   useEffect(() => {
-    const socket: Socket = io(BACKEND_URL, {
-      transports: ['websocket', 'polling'],
+    const realtime = new RealtimeClient();
+    realtime.connect();
+    const unsubscribe = realtime.subscribe(({ type }) => {
+      if (['availability_changed', 'queue_updated', 'consultation_started',
+        'consultation_completed', 'new_consultation_request'].includes(type)) loadData();
     });
-    socket.on('availability_changed', () => loadData());
-    socket.on('queue_updated', () => loadData());
-    socket.on('consultation_started', () => loadData());
-    socket.on('consultation_completed', () => loadData());
-    socket.on('new_consultation_request', () => loadData());
-    return () => { socket.disconnect(); };
+    return () => { unsubscribe(); realtime.disconnect(); };
   }, [loadData]);
 
   useEffect(() => {

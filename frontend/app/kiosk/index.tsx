@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import io, { Socket } from 'socket.io-client';
+import { RealtimeClient } from '@/src/utils/realtime';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -48,14 +48,14 @@ export default function KioskHome() {
     loadFaculty();
   }, [loadFaculty]);
 
-  // Real-time updates via Socket.IO
+  // Real-time updates via the native WebSocket endpoint.
   useEffect(() => {
-    const socket: Socket = io(BACKEND_URL, {
-      transports: ['websocket', 'polling'],
+    const realtime = new RealtimeClient();
+    realtime.connect();
+    const unsubscribe = realtime.subscribe(({ type }) => {
+      if (type === 'availability_changed' || type === 'queue_updated') loadFaculty();
     });
-    socket.on('availability_changed', () => loadFaculty());
-    socket.on('queue_updated', () => loadFaculty());
-    return () => { socket.disconnect(); };
+    return () => { unsubscribe(); realtime.disconnect(); };
   }, [loadFaculty]);
 
   const onRefresh = async () => {
@@ -114,16 +114,6 @@ export default function KioskHome() {
         <View>
           <Text style={styles.title}>ConKiosk</Text>
           <Text style={styles.subtitle}>Faculty Consultation System</Text>
-        </View>
-        <View style={styles.headerRight}>
-          <TouchableOpacity
-            testID="kiosk-tv-link"
-            style={styles.tvButton}
-            onPress={() => router.push('/tv')}
-          >
-            <Ionicons name="tv-outline" size={20} color="#2196F3" />
-            <Text style={styles.tvButtonText}>TV Display</Text>
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -223,17 +213,6 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 28, fontWeight: '700', color: '#1A1A1A' },
   subtitle: { fontSize: 14, color: '#666', marginTop: 2 },
-  headerRight: { flexDirection: 'row', gap: 12 },
-  tvButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: '#E3F2FD',
-    borderRadius: 8,
-  },
-  tvButtonText: { color: '#2196F3', fontWeight: '600', fontSize: 13 },
   subHeader: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 8 },
   subHeaderTitle: { fontSize: 22, fontWeight: '700', color: '#1A1A1A' },
   subHeaderText: { fontSize: 14, color: '#666', marginTop: 4 },

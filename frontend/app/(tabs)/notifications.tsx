@@ -27,28 +27,19 @@ export default function NotificationsScreen() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { socket } = useAuth();
+  const { realtime } = useAuth();
 
   useEffect(() => {
     loadNotifications();
   }, []);
 
-  // Real-time updates via Socket.IO
+  // Real-time updates via the native WebSocket endpoint.
   useEffect(() => {
-    if (!socket) return;
-
-    const handleNewNotification = () => {
-      loadNotifications();
-    };
-
-    socket.on('new_notification', handleNewNotification);
-    socket.on('consultation_accepted', handleNewNotification);
-
-    return () => {
-      socket.off('new_notification', handleNewNotification);
-      socket.off('consultation_accepted', handleNewNotification);
-    };
-  }, [socket]);
+    if (!realtime) return;
+    return realtime.subscribe(({ type }) => {
+      if (type === 'new_notification' || type === 'consultation_accepted') loadNotifications();
+    });
+  }, [realtime]);
 
   const loadNotifications = async () => {
     try {
