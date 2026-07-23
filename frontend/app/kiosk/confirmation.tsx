@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,6 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 
 export default function ConfirmationScreen() {
   const router = useRouter();
+  const [secondsRemaining, setSecondsRemaining] = useState(45);
   const params = useLocalSearchParams<{
     queue_number: string;
     faculty_name: string;
@@ -13,13 +14,20 @@ export default function ConfirmationScreen() {
     topic: string;
   }>();
 
-  // Auto-return to home after 15 seconds
+  // Keep the ticket visible long enough to photograph, with a clear countdown.
   useEffect(() => {
     const t = setTimeout(() => {
       router.replace('/kiosk');
-    }, 15000);
+    }, 45000);
     return () => clearTimeout(t);
   }, [router]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSecondsRemaining((seconds) => Math.max(seconds - 1, 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -38,6 +46,10 @@ export default function ConfirmationScreen() {
         <View style={styles.queueCard}>
           <Text style={styles.queueLabel}>YOUR QUEUE NUMBER</Text>
           <Text testID="queue-number" style={styles.queueNumber}>#{params.queue_number}</Text>
+          <View style={styles.captureTimer}>
+            <Ionicons name="camera-outline" size={16} color="#1565C0" />
+            <Text style={styles.captureTimerText}>Take a photo — returning in {secondsRemaining}s</Text>
+          </View>
           <View style={styles.queueDivider} />
           <Text style={styles.facultyName}>{params.faculty_name}</Text>
           <View style={styles.officeRow}>
@@ -88,7 +100,7 @@ export default function ConfirmationScreen() {
           <Text style={styles.doneBtnText}>Done</Text>
         </TouchableOpacity>
 
-        <Text style={styles.autoReturnHint}>Returning to home in 15 seconds...</Text>
+        <Text style={styles.autoReturnHint}>Tap Done once you have saved your queue number.</Text>
       </View>
     </SafeAreaView>
   );
@@ -128,6 +140,11 @@ const styles = StyleSheet.create({
   },
   queueLabel: { fontSize: 12, letterSpacing: 2, color: '#666', fontWeight: '600' },
   queueNumber: { fontSize: 72, fontWeight: '800', color: '#2196F3', marginVertical: 8 },
+  captureTimer: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#E3F2FD', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 7,
+  },
+  captureTimerText: { color: '#1565C0', fontSize: 12, fontWeight: '600' },
   queueDivider: { width: '60%', height: 1, backgroundColor: '#E0E0E0', marginVertical: 12 },
   facultyName: { fontSize: 18, fontWeight: '700', color: '#1A1A1A' },
   officeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },

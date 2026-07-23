@@ -77,22 +77,19 @@ python3 -m venv venv
 source venv/bin/activate       # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# Create .env
-cat > .env <<EOF
-MONGO_URL=mongodb://localhost:27017
-DB_NAME=conkiosk
-JWT_SECRET_KEY=change-this-to-a-long-random-string
-EOF
+# Create .env from the safe template, then set real MongoDB credentials and a random JWT secret.
+cp .env.example .env
 
 # Start the server
 uvicorn server:socket_app --host 0.0.0.0 --port 8001 --reload
 ```
 
-### 3. Seed the database (first time only)
+### 3. Seed demo data only (development only)
 ```bash
+echo ALLOW_SEED_DATA=true >> .env
 curl -X POST http://localhost:8001/api/seed
 ```
-This creates 6 faculty, 8 students, and sample queue entries.
+This destructive endpoint creates demo data. Never enable it or run it against real data.
 
 ### 4. Frontend setup
 ```bash
@@ -402,15 +399,14 @@ See **`RPI5_DEPLOYMENT.md`** for the full step-by-step guide, including:
 
 ---
 
-## Security Notes (Before Production)
+## Production deployment checklist
 
-- [ ] Change `JWT_SECRET_KEY` in `backend/.env` to a long random string
-- [ ] Remove or protect the `/api/seed` endpoint (currently public + destructive)
-- [ ] Enable MongoDB authentication
-- [ ] Restrict CORS `allow_origins` in `server.py` to your domain instead of `"*"`
-- [ ] Set up HTTPS via Let's Encrypt if exposing beyond local network
-- [ ] Regular backups: `mongodump --db conkiosk --out /backups/$(date +%F)`
-- [ ] Never commit `.env` files (already in `.gitignore`)
+- [ ] Copy `backend/.env.example` to `backend/.env`; set `ENVIRONMENT=production`, a long unique `JWT_SECRET_KEY`, restricted `CORS_ORIGINS`, and `ALLOW_SEED_DATA=false`.
+- [ ] Use a MongoDB account with authentication and least-privilege access; do not use an unauthenticated local database.
+- [ ] Import faculty and student records through an approved administrative process. Do not call `/api/seed` after real data exists.
+- [ ] Keep the kiosk and TV on the school network; use a firewall to expose only the required local ports. Enable HTTPS if any access leaves that network.
+- [ ] Back up MongoDB regularly and test restoring a backup: `mongodump --db conkiosk --out /backups/$(date +%F)`.
+- [ ] Test the full workflow with non-production accounts: scan → submit → queue ticket → faculty start → TV “Now Serving” → complete.
 
 ---
 

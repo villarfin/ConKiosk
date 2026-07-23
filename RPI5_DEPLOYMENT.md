@@ -89,17 +89,14 @@ source venv/bin/activate
 # Install Python dependencies
 pip install -r requirements.txt
 
-# Create .env file
-cat > .env <<EOF
-MONGO_URL=mongodb://localhost:27017
-DB_NAME=conkiosk
-JWT_SECRET_KEY=CHANGE_THIS_TO_A_LONG_RANDOM_STRING
-EOF
+# Create .env file from the template. Set production credentials before starting.
+cp .env.example .env
 
-# Test run
-uvicorn server:app --host 0.0.0.0 --port 8001
+# Test run (uses the Socket.IO-enabled ASGI application)
+uvicorn server:socket_app --host 0.0.0.0 --port 8001
 
-# Seed the database (first time only)
+# Development only: enable this destructive endpoint before seeding demo data.
+echo ALLOW_SEED_DATA=true >> .env
 curl -X POST http://localhost:8001/api/seed
 ```
 
@@ -178,7 +175,7 @@ unclutter -idle 0.1 -root &
 chromium-browser --kiosk --noerrdialogs --disable-infobars \
   --disable-pinch --overscroll-history-navigation=0 \
   --check-for-update-interval=31536000 \
-  http://localhost:8001/kiosk
+  http://localhost/kiosk
 ```
 
 Make it executable:
@@ -210,7 +207,7 @@ xset -dpms
 xset s noblank
 unclutter -idle 0.1 -root &
 chromium-browser --kiosk --noerrdialogs --disable-infobars \
-  http://YOUR_RPI_IP:8001/tv
+  http://localhost/tv
 ```
 
 If using the same RPi for both kiosk and TV, use `xrandr` to configure dual displays and launch each Chromium instance on a specific screen with `--window-position`.
@@ -223,6 +220,8 @@ On your dev machine (where you have Node):
 
 ```bash
 cd frontend
+# Set EXPO_PUBLIC_BACKEND_URL in frontend/.env to http://YOUR_RPI_IP:8001
+# before exporting so the built kiosk and TV can reach the API.
 npx expo export -p web
 ```
 
@@ -318,12 +317,12 @@ Most USB QR scanners work as HID keyboards — no driver setup needed. Just:
 
 ## Security Recommendations (Before Production)
 
-1. Change `JWT_SECRET_KEY` in `.env` to a long random string
-2. Remove or protect the `/api/seed` endpoint (currently unprotected + destructive)
-3. Enable MongoDB auth (`sudo systemctl edit mongod`)
-4. Set up HTTPS via Let's Encrypt if exposing beyond local network
-5. Restrict CORS `allow_origins` in `server.py` to your specific domain
-6. Regular backups: `mongodump --db conkiosk`
+1. Use `backend/.env.example` as the template and set `ENVIRONMENT=production`.
+2. Set a long random `JWT_SECRET_KEY`, MongoDB credentials, and exact `CORS_ORIGINS`.
+3. Keep `ALLOW_SEED_DATA=false`; `/api/seed` must never run against real data.
+4. Enable MongoDB auth (`sudo systemctl edit mongod`).
+5. Set up HTTPS via Let's Encrypt if exposing beyond the school network.
+6. Regularly back up and restore-test MongoDB: `mongodump --db conkiosk`.
 
 ---
 

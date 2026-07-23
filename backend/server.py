@@ -11,19 +11,34 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from passlib.context import CryptContext
 from jose import JWTError, jwt
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 import socketio
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
+# Production configuration must be explicit; never fall back to a shared secret.
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+mongo_url = os.getenv("MONGO_URL")
+db_name = os.getenv("DB_NAME")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not mongo_url or not db_name or not SECRET_KEY:
+    raise RuntimeError("MONGO_URL, DB_NAME, and JWT_SECRET_KEY must be set in backend/.env")
+
+cors_origins = [origin.strip() for origin in os.getenv(
+    "CORS_ORIGINS", "http://localhost:8081,http://127.0.0.1:8081"
+).split(",") if origin.strip()]
+if ENVIRONMENT == "production" and "*" in cors_origins:
+    raise RuntimeError("CORS_ORIGINS cannot use '*' in production")
+ALLOW_SEED_DATA = os.getenv("ALLOW_SEED_DATA", "false").lower() == "true"
+
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db = client[db_name]
 
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "conkiosk-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 
@@ -34,7 +49,7 @@ app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
 # Socket.IO setup
-sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
+sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins=cors_origins)
 socket_app = socketio.ASGIApp(sio, app)
 
 # ==================== Models ====================
@@ -644,20 +659,26 @@ async def lookup_student(student_id: str):
 
 @api_router.post("/kiosk/students")
 async def upsert_student(student: Student):
-    """Create or update student (used when manually entering new student)"""
-    existing = await db.students.find_one({"student_id": student.student_id})
-    if existing:
-        await db.students.update_one(
-            {"student_id": student.student_id},
-            {"$set": student.dict()}
-        )
-    else:
+    """Register a new student without allowing a kiosk to overwrite existing records."""
+    try:
         await db.students.insert_one(student.dict())
-    return {"message": "Student saved", "student": student.dict()}
+        return {"message": "Student registered", "student": student.dict()}
+    except DuplicateKeyError:
+        # Existing records are intentionally never changed from a public kiosk.
+        return {"message": "Student already registered", "student": student.dict()}
 
 @api_router.post("/kiosk/consultation-request")
 async def submit_kiosk_request(request: KioskConsultationRequest):
     """Submit a consultation request from the kiosk. Creates queue entry."""
+    if not request.topic.strip():
+        raise HTTPException(status_code=422, detail="Consultation topic is required")
+    if not request.students:
+        raise HTTPException(status_code=422, detail="At least one student is required")
+    for student in request.students:
+        if not all((student.student_id.strip(), student.full_name.strip(), student.program.strip(),
+                    student.year_level.strip(), student.section.strip())):
+            raise HTTPException(status_code=422, detail="Student ID, name, program, year level, and section are required")
+
     # Verify faculty exists
     faculty = await db.faculty.find_one({"school_id": request.faculty_school_id})
     if not faculty:
@@ -667,14 +688,21 @@ async def submit_kiosk_request(request: KioskConsultationRequest):
     for student in request.students:
         existing = await db.students.find_one({"student_id": student.student_id})
         if not existing:
-            await db.students.insert_one(student.dict())
+            try:
+                await db.students.insert_one(student.dict())
+            except DuplicateKeyError:
+                # Another request registered the student first; retain that record.
+                pass
 
-    # Get next queue number for this faculty (only counting active queues)
-    last_queue = await db.queue.find_one(
-        {"faculty_school_id": request.faculty_school_id, "status": {"$in": ["waiting", "serving"]}},
-        sort=[("queue_number", -1)]
+    # Atomically allocate one ticket for this faculty. This remains safe even if
+    # a future deployment adds more than one kiosk or retries a submission.
+    counter = await db.queue_counters.find_one_and_update(
+        {"faculty_school_id": request.faculty_school_id},
+        {"$inc": {"last_number": 1}, "$setOnInsert": {"created_at": datetime.utcnow()}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
     )
-    next_number = (last_queue["queue_number"] + 1) if last_queue else 1
+    next_number = counter["last_number"]
 
     # Determine names for display
     student_ids = [s.student_id for s in request.students]
@@ -892,6 +920,8 @@ async def complete_consultation(
 @api_router.post("/seed")
 async def seed_database():
     """Seed the database with test data - 6 faculty, students, requests, queue entries"""
+    if not ALLOW_SEED_DATA:
+        raise HTTPException(status_code=403, detail="Demo seeding is disabled")
 
     # Clear existing data
     await db.faculty.delete_many({})
@@ -900,6 +930,7 @@ async def seed_database():
     await db.notifications.delete_many({})
     await db.students.delete_many({})
     await db.queue.delete_many({})
+    await db.queue_counters.delete_many({})
 
     # Create multiple faculty with different statuses
     faculty_list = [
@@ -1117,6 +1148,29 @@ async def seed_database():
             "password": "password123"
         }
     }
+
+# Database indexes and queue-counter migration
+@app.on_event("startup")
+async def initialize_database():
+    """Enforce uniqueness and initialize ticket counters from existing data."""
+    await db.students.create_index("student_id", unique=True)
+    await db.faculty.create_index("school_id", unique=True)
+    await db.queue.create_index(
+        [("faculty_school_id", 1), ("queue_number", 1)], unique=True
+    )
+    await db.queue_counters.create_index("faculty_school_id", unique=True)
+
+    # Supports deployments that already have queue records before counters exist.
+    queue_maxes = db.queue.aggregate([
+        {"$group": {"_id": "$faculty_school_id", "last_number": {"$max": "$queue_number"}}}
+    ])
+    async for queue_max in queue_maxes:
+        await db.queue_counters.update_one(
+            {"faculty_school_id": queue_max["_id"]},
+            {"$max": {"last_number": queue_max["last_number"]},
+             "$setOnInsert": {"created_at": datetime.utcnow()}},
+            upsert=True,
+        )
 
 # Include router
 app.include_router(api_router)
