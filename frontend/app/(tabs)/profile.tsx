@@ -65,10 +65,17 @@ export default function ProfileScreen() {
       base64: true,
     });
 
-    if (!result.canceled && result.assets[0].base64) {
-      const base64Image = `data:image/jpeg;base64,${result.assets[0].base64}`;
-      await updateProfileImage(base64Image);
+    if (result.canceled) return;
+
+    const asset = result.assets[0];
+    if (!asset.base64) {
+      Alert.alert('Image unavailable', 'The selected image could not be read. Please try a JPG or PNG image.');
+      return;
     }
+
+    const mimeType = asset.mimeType || 'image/jpeg';
+    const base64Image = `data:${mimeType};base64,${asset.base64}`;
+    await updateProfileImage(base64Image);
   };
 
   const updateProfileImage = async (base64Image: string) => {
@@ -155,22 +162,9 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleLogout = () => {
-    Alert.alert(
-      'Confirm Logout',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
-            await logout();
-            router.replace('/login');
-          },
-        },
-      ]
-    );
+  const handleLogout = async () => {
+    await logout();
+    router.replace('/login');
   };
 
   return (

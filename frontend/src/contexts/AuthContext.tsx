@@ -13,14 +13,16 @@ interface Faculty {
   email: string;
   profile_image?: string;
   availability_status: string;
+  accepting_consultations: boolean;
   office_hours?: string;
+  role: 'faculty' | 'admin' | 'it_chair';
 }
 
 interface AuthContextType {
   isAuthenticated: boolean;
   faculty: Faculty | null;
   token: string | null;
-  login: (schoolId: string, password: string) => Promise<void>;
+  login: (schoolId: string, password: string) => Promise<'faculty' | 'admin' | 'it_chair'>;
   logout: () => Promise<void>;
   updateFaculty: (updatedFaculty: Faculty) => void;
   realtime: RealtimeClient | null;
@@ -67,7 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const login = async (schoolId: string, password: string) => {
+  const login = async (schoolId: string, password: string): Promise<'faculty' | 'admin' | 'it_chair'> => {
     try {
       const response = await fetch(`${BACKEND_URL}/api/auth/login`, {
         method: 'POST',
@@ -94,6 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setToken(data.access_token);
       setFaculty(data.faculty);
       setIsAuthenticated(true);
+      return data.faculty.role === 'admin' || data.faculty.role === 'it_chair' ? data.faculty.role : 'faculty';
     } catch (error) {
       console.error('Login error:', error);
       throw error;
@@ -102,6 +105,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
+      // Tell the server first so the kiosk and TV stop offering this faculty immediately.
+      if (token) {
+        await fetch(`${BACKEND_URL}/api/auth/logout`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      }
+    } catch (error) {
+      // Local sign-out must still succeed if Wi-Fi drops during the server request.
+      console.warn('Server logout request failed:', error);
+    } finally {
       await storage.secureRemove('auth_token');
       await storage.removeItem('faculty_data');
 
@@ -113,8 +124,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setToken(null);
       setFaculty(null);
       setIsAuthenticated(false);
-    } catch (error) {
-      console.error('Logout error:', error);
     }
   };
 

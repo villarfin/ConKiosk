@@ -32,8 +32,8 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
-      await login(schoolId, password);
-      router.replace('/(tabs)/dashboard');
+      const role = await login(schoolId, password);
+      router.replace(role === 'admin' ? '/admin' : '/(tabs)/dashboard');
     } catch (error: any) {
       Alert.alert('Login Failed', error.message || 'Invalid credentials');
     } finally {
@@ -127,10 +127,9 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            {/* Demo credentials hint */}
-            <View style={styles.demoHint}>
-              <Text style={styles.demoText}>Demo: FAC2024001 / password123</Text>
-            </View>
+            <TouchableOpacity style={styles.signupLink} onPress={() => router.push('/signup')}>
+              <Text style={styles.signupLinkText}>New faculty? Create an account</Text>
+            </TouchableOpacity>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -241,16 +240,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  demoHint: {
+  signupLink: {
     marginTop: 24,
-    padding: 12,
-    backgroundColor: '#FFF3E0',
-    borderRadius: 8,
     alignItems: 'center',
   },
-  demoText: {
-    fontSize: 12,
-    color: '#F57C00',
-    fontWeight: '500',
-  },
+  signupLinkText: { fontSize: 14, color: '#2196F3', fontWeight: '600' },
 });

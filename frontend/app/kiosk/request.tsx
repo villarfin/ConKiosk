@@ -45,10 +45,13 @@ export default function RequestScreen() {
       return;
     }
     setSubmitting(true);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       const response = await fetch(`${BACKEND_URL}/api/kiosk/consultation-request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           faculty_school_id: params.faculty_school_id,
           topic: topic.trim(),
@@ -58,7 +61,7 @@ export default function RequestScreen() {
       });
 
       if (!response.ok) {
-        const err = await response.json();
+        const err = await response.json().catch(() => ({}));
         throw new Error(err.detail || 'Failed to submit request');
       }
 
@@ -74,8 +77,12 @@ export default function RequestScreen() {
         },
       });
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to submit consultation request');
+      const message = e?.name === 'AbortError'
+        ? 'The server did not respond. Please check that the ConKiosk server is running, then try again.'
+        : (e.message || 'Failed to submit consultation request');
+      Alert.alert('Unable to Submit', message);
     } finally {
+      clearTimeout(timeout);
       setSubmitting(false);
     }
   };

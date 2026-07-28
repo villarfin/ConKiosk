@@ -22,6 +22,7 @@ interface Faculty {
   department: string;
   office_location: string;
   availability_status: string;
+  accepting_consultations: boolean;
   office_hours?: string;
   profile_image?: string;
 }
@@ -73,19 +74,17 @@ export default function KioskHome() {
     }
   };
 
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'available': return 'Available';
-      case 'busy': return 'Busy';
-      case 'unavailable': return 'Unavailable';
-      default: return 'Unknown';
+  const getConsultationLabel = (person: Faculty) => {
+    if (person.availability_status === 'busy') {
+      return person.accepting_consultations ? 'Busy — still accepting consultations' : 'Busy — not accepting consultations';
     }
+    return person.availability_status === 'available' ? 'Available — accepting consultations' : 'Unavailable';
   };
 
-  const canRequest = (status: string) => status === 'available' || status === 'busy';
+  const canRequest = (person: Faculty) => person.availability_status === 'available' || (person.availability_status === 'busy' && person.accepting_consultations);
 
   const handleSelectFaculty = (f: Faculty) => {
-    if (!canRequest(f.availability_status)) return;
+    if (!canRequest(f)) return;
     router.push({
       pathname: '/kiosk/identify',
       params: {
@@ -119,18 +118,18 @@ export default function KioskHome() {
 
       <View style={styles.subHeader}>
         <Text style={styles.subHeaderTitle}>Select a Faculty Member</Text>
-        <Text style={styles.subHeaderText}>Tap on an available faculty to request a consultation</Text>
+        <Text style={styles.subHeaderText}>Choose a faculty member marked as accepting consultations</Text>
       </View>
 
       {/* Legend */}
       <View style={styles.legend}>
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: '#4CAF50' }]} />
-          <Text style={styles.legendText}>Available</Text>
+          <Text style={styles.legendText}>Available — accepting</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: '#FF9800' }]} />
-          <Text style={styles.legendText}>Busy (can schedule)</Text>
+          <Text style={styles.legendText}>Busy — may still accept</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: '#F44336' }]} />
@@ -151,10 +150,10 @@ export default function KioskHome() {
               testID={`faculty-card-${f.school_id}`}
               style={[
                 styles.card,
-                !canRequest(f.availability_status) && styles.cardDisabled,
+                !canRequest(f) && styles.cardDisabled,
               ]}
               onPress={() => handleSelectFaculty(f)}
-              disabled={!canRequest(f.availability_status)}
+              disabled={!canRequest(f)}
               activeOpacity={0.85}
             >
               <View style={styles.cardHeader}>
@@ -181,15 +180,16 @@ export default function KioskHome() {
               </View>
 
               <View style={[styles.statusBadge, { backgroundColor: getStatusColor(f.availability_status) }]}>
-                <Text style={styles.statusBadgeText}>{getStatusLabel(f.availability_status)}</Text>
+                <Text style={styles.statusBadgeText}>{getConsultationLabel(f)}</Text>
               </View>
 
-              {canRequest(f.availability_status) && (
+              {canRequest(f) && (
                 <View style={styles.selectHint}>
-                  <Text style={styles.selectHintText}>Tap to consult</Text>
+                  <Text style={styles.selectHintText}>{f.availability_status === 'busy' ? 'Tap to request a consultation' : 'Tap to consult'}</Text>
                   <Ionicons name="arrow-forward" size={14} color="#2196F3" />
                 </View>
               )}
+              {f.availability_status === 'busy' && !f.accepting_consultations && <Text style={styles.unavailableHint}>This faculty member is currently busy.</Text>}
             </TouchableOpacity>
           ))}
         </View>
@@ -290,4 +290,5 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   selectHintText: { color: '#2196F3', fontSize: 12, fontWeight: '500' },
+  unavailableHint: { color: '#8A4B00', fontSize: 11, textAlign: 'center', marginTop: 10 },
 });

@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -41,6 +42,7 @@ const QR_PROGRAMS: Array<[string, string]> = [
   ['BSED SCIENCE', 'BSEd Science'], ['BSED MATHEMATICS', 'BSEd Mathematics'],
   ['BTLE', 'BTLE'], ['BTVTE', 'BTVTE'],
 ];
+const YEAR_LEVELS = ['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year'];
 
 const detectProgram = (qrContent: string) => {
   const normalizedContent = qrContent.toUpperCase();
@@ -75,6 +77,7 @@ export default function IdentifyScreen() {
   });
   const [scanInput, setScanInput] = useState('');
   const [lookingUp, setLookingUp] = useState(false);
+  const [yearPickerVisible, setYearPickerVisible] = useState(false);
   const scanInputRef = useRef<TextInput>(null);
   const scanBufferRef = useRef('');
   const isScanInputFocusedRef = useRef(false);
@@ -377,13 +380,16 @@ export default function IdentifyScreen() {
             <View style={styles.row}>
               <View style={[styles.inputGroup, { flex: 1 }]}>
                 <Text style={styles.inputLabel}>Year Level</Text>
-                <TextInput
+                <TouchableOpacity
                   testID="input-year-level"
-                  style={[styles.input, !currentStudent.year_level.trim() && styles.inputError]}
-                  placeholder="e.g., 3rd Year"
-                  value={currentStudent.year_level}
-                  onChangeText={(v) => setCurrentStudent({ ...currentStudent, year_level: v })}
-                />
+                  style={[styles.input, styles.selectInput, !currentStudent.year_level.trim() && styles.inputError]}
+                  onPress={() => setYearPickerVisible(true)}
+                >
+                  <Text style={currentStudent.year_level ? styles.selectValue : styles.selectPlaceholder}>
+                    {currentStudent.year_level || 'Select year'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={18} color="#666" />
+                </TouchableOpacity>
                 {!currentStudent.year_level.trim() && <Text style={styles.fieldRequiredText}>Year Level is required.</Text>}
               </View>
               <View style={[styles.inputGroup, { flex: 1 }]}>
@@ -448,6 +454,30 @@ export default function IdentifyScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      <Modal transparent visible={yearPickerVisible} animationType="fade" onRequestClose={() => setYearPickerVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.yearPickerModal}>
+            <Text style={styles.yearPickerTitle}>Select Year Level</Text>
+            {YEAR_LEVELS.map((year) => (
+              <TouchableOpacity
+                key={year}
+                style={[styles.yearOption, currentStudent.year_level === year && styles.yearOptionSelected]}
+                onPress={() => {
+                  setCurrentStudent({ ...currentStudent, year_level: year });
+                  setYearPickerVisible(false);
+                }}
+              >
+                <Text style={[styles.yearOptionText, currentStudent.year_level === year && styles.yearOptionTextSelected]}>{year}</Text>
+                {currentStudent.year_level === year && <Ionicons name="checkmark" size={20} color="#2196F3" />}
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={styles.yearPickerCancel} onPress={() => setYearPickerVisible(false)}>
+              <Text style={styles.yearPickerCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -518,6 +548,9 @@ const styles = StyleSheet.create({
     borderColor: '#E0E0E0',
   },
   inputError: { borderColor: '#C62828', borderWidth: 1.5 },
+  selectInput: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
+  selectValue: { color: '#1A1A1A', fontSize: 14 },
+  selectPlaceholder: { color: '#999', fontSize: 14 },
   fieldRequiredText: { color: '#C62828', fontSize: 11, marginTop: 4 },
   requiredWarning: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -525,6 +558,15 @@ const styles = StyleSheet.create({
   },
   requiredWarningText: { flex: 1, color: '#C62828', fontSize: 12, lineHeight: 17 },
   row: { flexDirection: 'row', gap: 12 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 24 },
+  yearPickerModal: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16 },
+  yearPickerTitle: { fontSize: 18, fontWeight: '700', color: '#1A1A1A', marginBottom: 8 },
+  yearOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 13, paddingHorizontal: 10, borderRadius: 8 },
+  yearOptionSelected: { backgroundColor: '#E3F2FD' },
+  yearOptionText: { color: '#1A1A1A', fontSize: 16 },
+  yearOptionTextSelected: { color: '#2196F3', fontWeight: '700' },
+  yearPickerCancel: { alignItems: 'center', paddingTop: 12, marginTop: 4, borderTopWidth: 1, borderTopColor: '#E0E0E0' },
+  yearPickerCancelText: { color: '#666', fontWeight: '600', fontSize: 15 },
   addStudentBtn: {
     flexDirection: 'row',
     alignItems: 'center',

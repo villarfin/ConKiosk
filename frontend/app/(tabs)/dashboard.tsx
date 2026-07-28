@@ -9,32 +9,52 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { ApiClient } from '@/src/utils/api';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 interface DashboardStats {
   today_count: number;
   pending_requests: number;
   monthly_count: number;
   availability_status: string;
+  accepting_consultations: boolean;
   upcoming_consultations: any[];
   recent_activity: any[];
 }
 
 export default function DashboardScreen() {
-  const { faculty, updateFaculty } = useAuth();
+  const { faculty, updateFaculty, realtime } = useAuth();
   const router = useRouter();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [busyChoiceVisible, setBusyChoiceVisible] = useState(false);
 
   useEffect(() => {
     loadDashboardData();
   }, []);
+
+  // Refresh on every tab visit as a reliable fallback for intermittent Wi-Fi events.
+  useFocusEffect(useCallback(() => {
+    loadDashboardData();
+  }, []));
+
+  // Keep the pending-request count and availability current after kiosk actions.
+  useEffect(() => {
+    if (!realtime) return;
+    return realtime.subscribe(({ type }) => {
+      if (['new_consultation_request', 'new_notification', 'consultation_accepted',
+        'consultation_rescheduled', 'consultation_started', 'consultation_completed',
+        'availability_changed', 'queue_updated'].includes(type)) {
+        loadDashboardData();
+      }
+    });
+  }, [realtime]);
 
   const loadDashboardData = async () => {
     try {
@@ -54,22 +74,27 @@ export default function DashboardScreen() {
     setRefreshing(false);
   }, []);
 
-  const updateAvailability = async (status: string) => {
+  const updateAvailability = async (status: string, acceptingConsultations?: boolean) => {
     try {
-      await ApiClient.patch('/faculty/availability', { status });
+      const updated = await ApiClient.patch('/faculty/availability', { status, accepting_consultations: acceptingConsultations });
       
       if (faculty) {
-        updateFaculty({ ...faculty, availability_status: status });
+        updateFaculty({ ...faculty, availability_status: updated.status, accepting_consultations: updated.accepting_consultations });
       }
 
       if (stats) {
-        setStats({ ...stats, availability_status: status });
+        setStats({ ...stats, availability_status: updated.status, accepting_consultations: updated.accepting_consultations });
       }
 
       Alert.alert('Success', `Status changed to ${status}`);
     } catch (error: any) {
       Alert.alert('Error', 'Failed to update availability');
     }
+  };
+  const chooseBusyStatus = () => setBusyChoiceVisible(true);
+  const setBusyChoice = async (acceptingConsultations: boolean) => {
+    setBusyChoiceVisible(false);
+    await updateAvailability('busy', acceptingConsultations);
   };
 
   const getAvailabilityColor = (status: string) => {
@@ -176,7 +201,7 @@ export default function DashboardScreen() {
                 styles.availabilityButton,
                 stats?.availability_status === 'busy' && styles.availabilityButtonActive,
               ]}
-              onPress={() => updateAvailability('busy')}
+              onPress={chooseBusyStatus}
             >
               <Ionicons name="time" size={20} color={stats?.availability_status === 'busy' ? '#FFFFFF' : '#FF9800'} />
               <Text style={[
@@ -199,6 +224,7 @@ export default function DashboardScreen() {
               ]}>Unavailable</Text>
             </TouchableOpacity>
           </View>
+          {stats?.availability_status === 'busy' && <Text style={styles.busyHint}>{stats.accepting_consultations ? 'Busy — still accepting consultation requests' : 'Busy — not accepting new consultation requests'}</Text>}
         </View>
 
         {/* Stats Grid */}
@@ -285,6 +311,18 @@ export default function DashboardScreen() {
           </View>
         )}
       </ScrollView>
+      <Modal visible={busyChoiceVisible} transparent animationType="fade" onRequestClose={() => setBusyChoiceVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.busyModal}>
+            <Ionicons name="time-outline" size={32} color="#FF9800" />
+            <Text style={styles.busyModalTitle}>Set status to Busy</Text>
+            <Text style={styles.busyModalText}>Will you still accept new consultation requests while busy?</Text>
+            <TouchableOpacity style={styles.acceptBusyButton} onPress={() => setBusyChoice(true)}><Text style={styles.acceptBusyButtonText}>Yes, still accept consultations</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.declineBusyButton} onPress={() => setBusyChoice(false)}><Text style={styles.declineBusyButtonText}>No, do not accept consultations</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.cancelBusyButton} onPress={() => setBusyChoiceVisible(false)}><Text style={styles.cancelBusyButtonText}>Cancel</Text></TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -410,6 +448,33 @@ const styles = StyleSheet.create({
   availabilityButtonTextActive: {
     color: '#FFFFFF',
   },
+  busyHint: {
+    marginTop: 10,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666666',
+    textAlign: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  busyModal: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 24,
+    alignItems: 'center',
+  },
+  busyModalTitle: { fontSize: 20, fontWeight: '700', color: '#1A1A1A', marginTop: 10 },
+  busyModalText: { fontSize: 14, color: '#666666', textAlign: 'center', lineHeight: 20, marginTop: 8, marginBottom: 20 },
+  acceptBusyButton: { width: '100%', backgroundColor: '#FF9800', padding: 14, borderRadius: 10, alignItems: 'center', marginBottom: 10 },
+  acceptBusyButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
+  declineBusyButton: { width: '100%', backgroundColor: '#FEE2E2', padding: 14, borderRadius: 10, alignItems: 'center', marginBottom: 10 },
+  declineBusyButtonText: { color: '#B91C1C', fontWeight: '700', fontSize: 14 },
+  cancelBusyButton: { padding: 10 },
+  cancelBusyButtonText: { color: '#64748B', fontWeight: '600' },
   statsGrid: {
     flexDirection: 'row',
     gap: 12,

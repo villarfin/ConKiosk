@@ -1,8 +1,10 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform } from 'react-native';
+import { useAuth } from '@/src/contexts/AuthContext';
 
 export default function TabsLayout() {
+  const { faculty } = useAuth();
   return (
     <Tabs
       screenOptions={{
@@ -66,6 +68,14 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person" size={size} color={color} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="it-chair"
+        options={{
+          href: faculty?.role === 'it_chair' ? undefined : null,
+          title: 'IT Chair',
+          tabBarIcon: ({ color, size }) => <Ionicons name="shield-checkmark" size={size} color={color} />,
         }}
       />
     </Tabs>

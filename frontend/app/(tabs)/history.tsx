@@ -26,7 +26,6 @@ interface Consultation {
   duration?: number;
   status: string;
   notes?: string;
-  remarks?: string;
 }
 
 const STATUS_FILTERS = ['all', 'scheduled', 'ongoing', 'completed', 'cancelled'];
@@ -40,7 +39,6 @@ export default function HistoryScreen() {
   const [selectedConsultation, setSelectedConsultation] = useState<Consultation | null>(null);
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [editNotes, setEditNotes] = useState('');
-  const [editRemarks, setEditRemarks] = useState('');
   const [editStatus, setEditStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -88,7 +86,6 @@ export default function HistoryScreen() {
   const openDetails = (consultation: Consultation) => {
     setSelectedConsultation(consultation);
     setEditNotes(consultation.notes || '');
-    setEditRemarks(consultation.remarks || '');
     setEditStatus(consultation.status);
     setDetailsModalVisible(true);
   };
@@ -97,7 +94,6 @@ export default function HistoryScreen() {
     setDetailsModalVisible(false);
     setSelectedConsultation(null);
     setEditNotes('');
-    setEditRemarks('');
     setEditStatus('');
   };
 
@@ -108,7 +104,6 @@ export default function HistoryScreen() {
     try {
       await ApiClient.patch(`/consultations/${selectedConsultation._id}`, {
         notes: editNotes,
-        remarks: editRemarks,
         status: editStatus,
       });
 
@@ -366,19 +361,6 @@ export default function HistoryScreen() {
                       onChangeText={setEditNotes}
                       multiline
                       numberOfLines={4}
-                      textAlignVertical="top"
-                    />
-                  </View>
-
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Faculty Remarks</Text>
-                    <TextInput
-                      style={styles.textArea}
-                      placeholder="Add remarks..."
-                      value={editRemarks}
-                      onChangeText={setEditRemarks}
-                      multiline
-                      numberOfLines={3}
                       textAlignVertical="top"
                     />
                   </View>

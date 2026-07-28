@@ -5,7 +5,7 @@ A complete 4-component consultation management system for universities, built as
 ![Status](https://img.shields.io/badge/status-active-success)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-009688)
 ![Frontend](https://img.shields.io/badge/frontend-Expo%20%2F%20React%20Native-000020)
-![Database](https://img.shields.io/badge/database-MongoDB-47A248)
+![Database](https://img.shields.io/badge/database-PostgreSQL-4169E1)
 
 ---
 
@@ -41,7 +41,7 @@ ConKiosk digitizes faculty consultations. Instead of manual queues and uncertain
 | 1 | **Faculty Mobile App** | Login, view/accept/decline requests, manage availability, history | Faculty phone (Expo Go or built APK/IPA) |
 | 2 | **Student Kiosk** | Public touchscreen for students to request consultations | Chromium on RPi's touchscreen |
 | 3 | **TV Queue Display** | Real-time board showing all faculty statuses and queue numbers | Chromium on monitor connected to RPi |
-| 4 | **Raspberry Pi 5 Server** | FastAPI backend + MongoDB + Socket.IO | The RPi itself |
+| 4 | **Raspberry Pi 5 Server** | FastAPI backend + PostgreSQL + WebSockets | The RPi itself |
 
 All four components live in **one codebase** in this repo.
 
@@ -49,9 +49,9 @@ All four components live in **one codebase** in this repo.
 
 ## Tech Stack
 
-- **Backend:** Python 3.11+, FastAPI, MongoDB, python-socketio, JWT auth (bcrypt)
+- **Backend:** Python 3.11+, FastAPI, PostgreSQL, native WebSockets, JWT auth (bcrypt)
 - **Frontend:** Expo (React Native) + TypeScript + Expo Router
-- **Real-time:** Socket.IO (works well on RPi 5)
+- **Real-time:** Native WebSockets with automatic client reconnection
 - **QR Scanning:** USB HID keyboard scanners (no special driver)
 
 ---
@@ -61,7 +61,7 @@ All four components live in **one codebase** in this repo.
 ### Prerequisites
 - Node.js 18+ and `yarn`
 - Python 3.11+
-- MongoDB (local install or Docker)
+- PostgreSQL (local install or Docker)
 - Expo Go app on your phone (for mobile testing)
 
 ### 1. Clone the repo
@@ -77,7 +77,7 @@ python3 -m venv venv
 source venv/bin/activate       # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# Create .env from the safe template, then set real MongoDB credentials and a random JWT secret.
+# Create .env from the safe template, then set PostgreSQL credentials and a random JWT secret.
 cp .env.example .env
 
 # Start the server
@@ -110,6 +110,18 @@ yarn start
 - **Student Kiosk**: Open `http://localhost:8081/kiosk` in browser
 - **TV Display**: Open `http://localhost:8081/tv` in browser
 
+### 6. Safe pre-deployment pilot
+
+Do not test using the production database. Create a separate PostgreSQL database and
+use `backend/.env.test.example` as its configuration template. The integration suite
+intentionally requires `RUN_INTEGRATION_TESTS=true` before it can reset test data.
+
+For phone testing, set `EXPO_PUBLIC_BACKEND_URL` to the server's LAN IP (not
+`localhost`), run `yarn start`, and open the app in Expo Go on phones connected to
+the same Wi-Fi. When the pilot passes, build an installable Android APK with
+`npx eas-cli build --profile preview --platform android`; `preview` is for internal
+faculty distribution, while `production` produces a Play Store AAB.
+
 ---
 
 ## Test Credentials
@@ -135,7 +147,7 @@ ConKiosk/
 ├── backend/
 │   ├── server.py              ← ALL backend logic, endpoints, seed data
 │   ├── requirements.txt       ← Python dependencies
-│   └── .env                   ← MongoDB URL + JWT secret (do NOT commit)
+│   └── .env                   ← PostgreSQL URL + JWT secret (do NOT commit)
 │
 ├── frontend/
 │   ├── app/
@@ -161,7 +173,7 @@ ConKiosk/
 │   │
 │   ├── src/
 │   │   ├── contexts/
-│   │   │   └── AuthContext.tsx  ← Login/logout, JWT, Socket.IO client
+│   │   │   └── AuthContext.tsx  ← Login/logout, JWT, WebSocket client
 │   │   └── utils/
 │   │       ├── api.ts         ← HTTP client with auth headers
 │   │       └── storage/       ← Wrapper around SecureStore + AsyncStorage
@@ -251,7 +263,7 @@ students = [
 
 ### 🖼️ 4. Change Profile Images
 
-**Faculty profile images** are stored as base64 in MongoDB.
+**Faculty profile images** are stored as base64 in PostgreSQL.
 - Users upload from their phones via Profile → tap avatar → pick from gallery.
 - For seed data, you can add a base64 string:
 ```python
@@ -290,7 +302,7 @@ else columnCount = 1;
 **Header summary chips:**
 Look for `<View style={styles.summaryRow}>` — you can hide the counts or add more.
 
-**Refresh interval** (if Socket.IO is unreliable):
+**Fallback refresh interval** (WebSockets reconnect automatically):
 ```ts
 const poll = setInterval(loadData, 10000);  // Every 10 seconds
 ```
@@ -366,15 +378,15 @@ Ask the maintainer or implement it yourself; the route is in `backend/server.py`
 ## Raspberry Pi 5 Deployment
 
 See **`RPI5_DEPLOYMENT.md`** for the full step-by-step guide, including:
-- Installing MongoDB, Python, Chromium on RPi 5
+- Installing PostgreSQL, Python, Chromium on RPi 5
 - Running the backend as a systemd service
 - Setting up the kiosk to auto-launch on boot
-- Configuring nginx to serve the web build and proxy Socket.IO
+- Configuring nginx to serve the web build and proxy WebSockets
 - USB QR scanner setup (HID keyboard, no drivers needed)
 - Security hardening for production use
 
 **Short version:**
-1. Install MongoDB and Python 3.11 on the RPi.
+1. Install PostgreSQL and Python 3.11 on the RPi.
 2. Copy this repo to the RPi.
 3. Run backend as a service (see `.service` file example in the guide).
 4. On your dev machine: `cd frontend && npx expo export -p web` — creates a `dist/` folder.
@@ -391,8 +403,8 @@ See **`RPI5_DEPLOYMENT.md`** for the full step-by-step guide, including:
 |---------|----------|
 | Faculty app can't reach backend | Check that phone + RPi are on the same WiFi. Verify RPi's IP with `hostname -I`. Check `frontend/.env`. |
 | Kiosk / TV shows blank page | Ensure Expo dev server is running, or that `nginx` is serving the `dist/` folder. |
-| Socket.IO not updating | Check nginx `proxy_pass` for `/socket.io/`. Verify `python-socketio` is installed. |
-| MongoDB won't start | `sudo journalctl -u mongod` — often out of disk space or corrupted data dir. |
+| Real-time updates do not arrive | Check nginx `proxy_pass` for `/ws` and the backend service logs. |
+| PostgreSQL won't start | `sudo journalctl -u postgresql` — often out of disk space or a configuration issue. |
 | QR scanner types garbage | Most scanners have a config mode (scan a "settings" barcode from their manual). Set to "USB HID keyboard, English, US layout, add Enter suffix." |
 | 500 error on any endpoint | Check backend logs: `sudo journalctl -u conkiosk -f`. |
 | I broke seed data | Just re-run `curl -X POST http://<backend-url>/api/seed`. |
@@ -402,10 +414,10 @@ See **`RPI5_DEPLOYMENT.md`** for the full step-by-step guide, including:
 ## Production deployment checklist
 
 - [ ] Copy `backend/.env.example` to `backend/.env`; set `ENVIRONMENT=production`, a long unique `JWT_SECRET_KEY`, restricted `CORS_ORIGINS`, and `ALLOW_SEED_DATA=false`.
-- [ ] Use a MongoDB account with authentication and least-privilege access; do not use an unauthenticated local database.
+- [ ] Use a dedicated PostgreSQL account with a strong password and least-privilege access.
 - [ ] Import faculty and student records through an approved administrative process. Do not call `/api/seed` after real data exists.
 - [ ] Keep the kiosk and TV on the school network; use a firewall to expose only the required local ports. Enable HTTPS if any access leaves that network.
-- [ ] Back up MongoDB regularly and test restoring a backup: `mongodump --db conkiosk --out /backups/$(date +%F)`.
+- [ ] Back up PostgreSQL regularly and test restoring a backup: `pg_dump -U conkiosk conkiosk > conkiosk.sql`.
 - [ ] Test the full workflow with non-production accounts: scan → submit → queue ticket → faculty start → TV “Now Serving” → complete.
 
 ---

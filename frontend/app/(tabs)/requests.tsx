@@ -14,7 +14,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ApiClient } from '@/src/utils/api';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { useAuth } from '@/src/contexts/AuthContext';
+import { useFocusEffect } from 'expo-router';
+
+const localDateString = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const monthStart = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
+const sameDay = (left: Date, right: Date) => localDateString(left) === localDateString(right);
 
 interface ConsultationRequest {
   _id: string;
@@ -26,9 +32,12 @@ interface ConsultationRequest {
   preferred_time: string;
   status: string;
   created_at: string;
+  student_names?: string[];
+  student_ids?: string[];
 }
 
 export default function RequestsScreen() {
+  const { realtime } = useAuth();
   const [requests, setRequests] = useState<ConsultationRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -39,13 +48,30 @@ export default function RequestsScreen() {
   const [declineReason, setDeclineReason] = useState('');
   const [rescheduleDate, setRescheduleDate] = useState(new Date());
   const [rescheduleTime, setRescheduleTime] = useState(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(monthStart(new Date()));
+  const [clockMode, setClockMode] = useState<'hour' | 'minute'>('hour');
+  const [clockModalVisible, setClockModalVisible] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
     loadRequests();
   }, []);
+
+  // Tabs stay mounted after the first visit, so refresh whenever this tab becomes visible.
+  useFocusEffect(useCallback(() => {
+    loadRequests();
+  }, []));
+
+  // Refresh as soon as this faculty receives a kiosk request or a request update.
+  useEffect(() => {
+    if (!realtime) return;
+    return realtime.subscribe(({ type }) => {
+      if (['new_consultation_request', 'new_notification', 'consultation_accepted',
+        'consultation_rescheduled', 'queue_updated'].includes(type)) {
+        loadRequests();
+      }
+    });
+  }, [realtime]);
 
   const loadRequests = async () => {
     try {
@@ -122,6 +148,12 @@ export default function RequestsScreen() {
   };
 
   const openRescheduleModal = () => {
+    const selectedDate = new Date();
+    selectedDate.setHours(9, 0, 0, 0);
+    setRescheduleDate(selectedDate);
+    setRescheduleTime(selectedDate);
+    setCalendarMonth(monthStart(selectedDate));
+    setClockMode('hour');
     setActionModalVisible(false);
     setRescheduleModalVisible(true);
   };
@@ -129,7 +161,7 @@ export default function RequestsScreen() {
   const handleReschedule = async () => {
     if (!selectedRequest) return;
 
-    const dateStr = rescheduleDate.toISOString().split('T')[0];
+    const dateStr = localDateString(rescheduleDate);
     const timeStr = rescheduleTime.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
@@ -274,6 +306,16 @@ export default function RequestsScreen() {
             {selectedRequest && (
               <View style={styles.modalBody}>
                 <Text style={styles.modalStudentName}>{selectedRequest.student_name}</Text>
+                {selectedRequest.student_names && selectedRequest.student_names.length > 1 && (
+                  <View style={styles.groupMembers}>
+                    <Text style={styles.groupMembersTitle}>Group members ({selectedRequest.student_names.length})</Text>
+                    {selectedRequest.student_names.map((name, index) => (
+                      <Text key={`${name}-${index}`} style={styles.groupMember}>
+                        {index + 1}. {name}{selectedRequest.student_ids?.[index] ? ` — ${selectedRequest.student_ids[index]}` : ''}
+                      </Text>
+                    ))}
+                  </View>
+                )}
                 <Text style={styles.modalTopic}>{selectedRequest.topic}</Text>
                 <Text style={styles.modalSchedule}>
                   {selectedRequest.preferred_date} at {selectedRequest.preferred_time}
@@ -330,54 +372,38 @@ export default function RequestsScreen() {
             </View>
 
             <View style={styles.modalBody}>
-              <TouchableOpacity
-                style={styles.dateTimeButton}
-                onPress={() => setShowDatePicker(true)}
-              >
-                <Ionicons name="calendar-outline" size={20} color="#2196F3" />
-                <Text style={styles.dateTimeText}>
-                  Date: {rescheduleDate.toLocaleDateString()}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.dateTimeButton}
-                onPress={() => setShowTimePicker(true)}
-              >
-                <Ionicons name="time-outline" size={20} color="#2196F3" />
-                <Text style={styles.dateTimeText}>
-                  Time: {rescheduleTime.toLocaleTimeString('en-US', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: true,
+              <View style={styles.dateTimeButton}><Ionicons name="calendar-outline" size={20} color="#2196F3" /><Text style={styles.dateTimeText}>Date: {rescheduleDate.toLocaleDateString()}</Text></View>
+              <View style={styles.calendarHeader}><TouchableOpacity onPress={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}><Ionicons name="chevron-back" size={20} color="#2196F3" /></TouchableOpacity><Text style={styles.calendarTitle}>{calendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</Text><TouchableOpacity onPress={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}><Ionicons name="chevron-forward" size={20} color="#2196F3" /></TouchableOpacity></View>
+              <View style={styles.calendarGrid}>{WEEKDAYS.map((day) => <Text key={day} style={styles.weekday}>{day}</Text>)}{Array.from({ length: monthStart(calendarMonth).getDay() }).map((_, index) => <View key={`blank-${index}`} style={styles.calendarDay} />)}{Array.from({ length: new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate() }, (_, index) => { const day = index + 1; const date = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day); const disabled = date < monthStart(new Date()); const selected = sameDay(date, rescheduleDate); return <TouchableOpacity key={day} disabled={disabled} style={[styles.calendarDay, selected && styles.calendarDaySelected, disabled && styles.calendarDayDisabled]} onPress={() => setRescheduleDate(date)}><Text style={[styles.calendarDayText, selected && styles.calendarDayTextSelected, disabled && styles.calendarDayTextDisabled]}>{day}</Text></TouchableOpacity>; })}</View>
+              <View style={styles.dateTimeButton}><Ionicons name="time-outline" size={20} color="#2196F3" /><Text style={styles.dateTimeText}>Time: {rescheduleTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</Text></View>
+              <TouchableOpacity style={styles.clockOpenButton} onPress={() => { setClockMode('hour'); setClockModalVisible(true); }}><Ionicons name="alarm-outline" size={20} color="#2196F3" /><Text style={styles.clockOpenText}>Set time with analog clock</Text></TouchableOpacity>
+              {false && <View />}
+              {/** Clock popup content is rendered below the reschedule modal. */}
+              <View style={{ display: 'none' }}>
+              <View style={styles.clockWrap}>
+                <View style={styles.clockFace}>
+                  {Array.from({ length: 12 }, (_, index) => {
+                    const value = clockMode === 'hour' ? (index === 0 ? 12 : index) : index * 5;
+                    const angle = (index * 30 - 90) * (Math.PI / 180);
+                    const selected = clockMode === 'hour'
+                      ? ((rescheduleTime.getHours() % 12) || 12) === value
+                      : rescheduleTime.getMinutes() === value;
+                    return <TouchableOpacity key={`${clockMode}-${value}`} style={[styles.clockNumber, { left: 96 + Math.cos(angle) * 82, top: 96 + Math.sin(angle) * 82 }, selected && styles.clockNumberSelected]} onPress={() => {
+                      const time = new Date(rescheduleTime);
+                      if (clockMode === 'hour') {
+                        time.setHours((value % 12) + (time.getHours() >= 12 ? 12 : 0));
+                        setClockMode('minute');
+                      } else time.setMinutes(value, 0, 0);
+                      setRescheduleTime(time);
+                    }}><Text style={[styles.clockNumberText, selected && styles.clockNumberTextSelected]}>{clockMode === 'hour' ? value : String(value).padStart(2, '0')}</Text></TouchableOpacity>;
                   })}
-                </Text>
-              </TouchableOpacity>
-
-              {showDatePicker && (
-                <DateTimePicker
-                  value={rescheduleDate}
-                  mode="date"
-                  display="default"
-                  onChange={(event, date) => {
-                    setShowDatePicker(false);
-                    if (date) setRescheduleDate(date);
-                  }}
-                  minimumDate={new Date()}
-                />
-              )}
-
-              {showTimePicker && (
-                <DateTimePicker
-                  value={rescheduleTime}
-                  mode="time"
-                  display="default"
-                  onChange={(event, time) => {
-                    setShowTimePicker(false);
-                    if (time) setRescheduleTime(time);
-                  }}
-                />
-              )}
+                  <View style={styles.clockCenter}><Text style={styles.clockCenterText}>{clockMode === 'hour' ? 'HR' : 'MIN'}</Text></View>
+                </View>
+              </View>
+              <View style={styles.ampmRow}>
+                {['AM', 'PM'].map((period) => { const isSelected = (period === 'PM') === (rescheduleTime.getHours() >= 12); return <TouchableOpacity key={period} style={[styles.ampmButton, isSelected && styles.ampmButtonSelected]} onPress={() => { const time = new Date(rescheduleTime); time.setHours((time.getHours() % 12) + (period === 'PM' ? 12 : 0)); setRescheduleTime(time); }}><Text style={[styles.ampmText, isSelected && styles.ampmTextSelected]}>{period}</Text></TouchableOpacity>; })}
+              </View>
+              </View>
 
               <TouchableOpacity
                 style={[styles.submitButton, actionLoading && styles.submitButtonDisabled]}
@@ -391,6 +417,18 @@ export default function RequestsScreen() {
                 )}
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={clockModalVisible} transparent animationType="fade" onRequestClose={() => setClockModalVisible(false)}>
+        <View style={styles.clockModalOverlay}>
+          <View style={styles.clockModalCard}>
+            <View style={styles.modalHeader}><Text style={styles.modalTitle}>Set consultation time</Text><TouchableOpacity onPress={() => setClockModalVisible(false)}><Ionicons name="close" size={24} color="#666" /></TouchableOpacity></View>
+            <Text style={styles.presetLabel}>Select {clockMode === 'hour' ? 'an hour' : 'minutes'}</Text>
+            <View style={styles.clockWrap}><View style={styles.clockFace}>{Array.from({ length: 12 }, (_, index) => { const value = clockMode === 'hour' ? (index === 0 ? 12 : index) : index * 5; const angle = (index * 30 - 90) * (Math.PI / 180); const selected = clockMode === 'hour' ? ((rescheduleTime.getHours() % 12) || 12) === value : rescheduleTime.getMinutes() === value; return <TouchableOpacity key={`popup-${clockMode}-${value}`} style={[styles.clockNumber, { left: 96 + Math.cos(angle) * 82, top: 96 + Math.sin(angle) * 82 }, selected && styles.clockNumberSelected]} onPress={() => { const time = new Date(rescheduleTime); if (clockMode === 'hour') { time.setHours((value % 12) + (time.getHours() >= 12 ? 12 : 0)); setClockMode('minute'); } else time.setMinutes(value, 0, 0); setRescheduleTime(time); }}><Text style={[styles.clockNumberText, selected && styles.clockNumberTextSelected]}>{clockMode === 'hour' ? value : String(value).padStart(2, '0')}</Text></TouchableOpacity>; })}<View style={styles.clockCenter}><Text style={styles.clockCenterText}>{clockMode === 'hour' ? 'HR' : 'MIN'}</Text></View></View></View>
+            <View style={styles.ampmRow}>{['AM', 'PM'].map((period) => { const isSelected = (period === 'PM') === (rescheduleTime.getHours() >= 12); return <TouchableOpacity key={`popup-${period}`} style={[styles.ampmButton, isSelected && styles.ampmButtonSelected]} onPress={() => { const time = new Date(rescheduleTime); time.setHours((time.getHours() % 12) + (period === 'PM' ? 12 : 0)); setRescheduleTime(time); }}><Text style={[styles.ampmText, isSelected && styles.ampmTextSelected]}>{period}</Text></TouchableOpacity>; })}</View>
+            <TouchableOpacity style={styles.submitButton} onPress={() => setClockModalVisible(false)}><Text style={styles.submitButtonText}>Done</Text></TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -622,6 +660,9 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
     marginBottom: 8,
   },
+  groupMembers: { marginTop: 12, marginBottom: 4, padding: 12, backgroundColor: '#F1F8FF', borderRadius: 10 },
+  groupMembersTitle: { fontSize: 14, fontWeight: '700', color: '#1A1A1A', marginBottom: 6 },
+  groupMember: { fontSize: 14, color: '#374151', lineHeight: 21 },
   modalTopic: {
     fontSize: 14,
     color: '#666666',
@@ -650,6 +691,37 @@ const styles = StyleSheet.create({
   rescheduleButton: {
     backgroundColor: '#FF9800',
   },
+  presetLabel: { marginTop: 4, marginBottom: 8, color: '#555', fontSize: 13, fontWeight: '600' },
+  presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
+  presetButton: { backgroundColor: '#E3F2FD', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10 },
+  presetButtonText: { color: '#1976D2', fontSize: 12, fontWeight: '600' },
+  clockWrap: { alignItems: 'center', marginBottom: 12 },
+  clockFace: { width: 230, height: 230, borderRadius: 115, backgroundColor: '#F5F9FD', borderWidth: 2, borderColor: '#BBDEFB', position: 'relative' },
+  clockNumber: { position: 'absolute', width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', marginLeft: -19, marginTop: -19 },
+  clockNumberSelected: { backgroundColor: '#2196F3' },
+  clockNumberText: { color: '#1A1A1A', fontSize: 13, fontWeight: '700' },
+  clockNumberTextSelected: { color: '#FFFFFF' },
+  clockCenter: { position: 'absolute', left: 91, top: 91, width: 48, height: 48, borderRadius: 24, backgroundColor: '#E3F2FD', alignItems: 'center', justifyContent: 'center' },
+  clockCenterText: { color: '#2196F3', fontSize: 11, fontWeight: '800' },
+  ampmRow: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginBottom: 16 },
+  ampmButton: { paddingVertical: 9, paddingHorizontal: 24, borderRadius: 20, borderWidth: 1, borderColor: '#90CAF9' },
+  ampmButtonSelected: { backgroundColor: '#2196F3', borderColor: '#2196F3' },
+  ampmText: { color: '#1976D2', fontWeight: '700' },
+  ampmTextSelected: { color: '#FFFFFF' },
+  clockOpenButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#E3F2FD', borderRadius: 10, padding: 13, marginBottom: 16 },
+  clockOpenText: { color: '#1976D2', fontWeight: '700' },
+  clockModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
+  clockModalCard: { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 18 },
+  calendarHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  calendarTitle: { color: '#1A1A1A', fontSize: 15, fontWeight: '700' },
+  calendarGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 },
+  weekday: { width: '14.285%', textAlign: 'center', color: '#777', fontSize: 10, fontWeight: '600', paddingBottom: 6 },
+  calendarDay: { width: '14.285%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 18 },
+  calendarDaySelected: { backgroundColor: '#2196F3' },
+  calendarDayDisabled: { opacity: 0.35 },
+  calendarDayText: { color: '#1A1A1A', fontSize: 13 },
+  calendarDayTextSelected: { color: '#FFFFFF', fontWeight: '700' },
+  calendarDayTextDisabled: { color: '#999' },
   declineButton: {
     backgroundColor: '#F44336',
   },

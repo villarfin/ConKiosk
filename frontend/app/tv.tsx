@@ -1,13 +1,40 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Dimensions, Image, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { RealtimeClient } from '@/src/utils/realtime';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
+let announcementAudioContext: AudioContext | null = null;
+
+const enableAnnouncementSound = async () => {
+  if (typeof window === 'undefined') return;
+  const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+  if (!AudioContextClass) return false;
+  announcementAudioContext ??= new AudioContextClass();
+  await announcementAudioContext.resume?.();
+  return announcementAudioContext.state === 'running';
+};
+
+const playAnnouncementTone = () => {
+  const context = announcementAudioContext;
+  if (!context || context.state !== 'running') return false;
+  [0, 0.24].forEach((offset) => {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.frequency.value = offset ? 880 : 660;
+    gain.gain.setValueAtTime(0.0001, context.currentTime + offset);
+    gain.gain.exponentialRampToValueAtTime(0.18, context.currentTime + offset + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + offset + 0.2);
+    oscillator.connect(gain); gain.connect(context.destination);
+    oscillator.start(context.currentTime + offset); oscillator.stop(context.currentTime + offset + 0.21);
+  });
+  return true;
+};
+
 interface NowServing {
-  queue_number: number;
+  queue_number: string;
   student_names: string[];
   topic: string;
 }
@@ -21,17 +48,27 @@ interface FacultyStatus {
   profile_image?: string;
   now_serving: NowServing | null;
   waiting_count: number;
-  next_queue_numbers: number[];
+  next_queue_numbers: string[];
 }
+interface RescheduleAnnouncement { student_name: string; date: string; time: string; }
 
 export default function TVDisplay() {
   const [data, setData] = useState<FacultyStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(new Date());
+  const [rescheduleAnnouncement, setRescheduleAnnouncement] = useState<RescheduleAnnouncement | null>(null);
+  const [soundReady, setSoundReady] = useState(false);
+
+  const activateSound = async () => {
+    const enabled = await enableAnnouncementSound();
+    setSoundReady(Boolean(enabled));
+    if (enabled) playAnnouncementTone();
+  };
 
   const loadData = useCallback(async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/tv-display/status`);
+      const response = await fetch(`${BACKEND_URL}/api/tv-display/status`, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`TV status request failed: ${response.status}`);
       const result = await response.json();
       setData(result);
     } catch (e) {
@@ -43,16 +80,21 @@ export default function TVDisplay() {
 
   useEffect(() => {
     loadData();
-    const poll = setInterval(loadData, 10000);
+    // WebSocket events update immediately; recover within one second if a display
+    // browser misses an event while reconnecting to Wi-Fi.
+    const poll = setInterval(loadData, 1000);
     return () => clearInterval(poll);
   }, [loadData]);
 
   useEffect(() => {
     const realtime = new RealtimeClient();
     realtime.connect();
-    const unsubscribe = realtime.subscribe(({ type }) => {
+    const unsubscribe = realtime.subscribe(({ type, data }) => {
       if (['availability_changed', 'queue_updated', 'consultation_started',
         'consultation_completed', 'new_consultation_request'].includes(type)) loadData();
+      if (type === 'consultation_rescheduled' && data?.student_name && data?.date && data?.time) {
+        setRescheduleAnnouncement({ student_name: String(data.student_name), date: String(data.date), time: String(data.time) });
+      }
     });
     return () => { unsubscribe(); realtime.disconnect(); };
   }, [loadData]);
@@ -61,6 +103,12 @@ export default function TVDisplay() {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
+  useEffect(() => {
+    if (!rescheduleAnnouncement) return;
+    playAnnouncementTone();
+    const timer = setTimeout(() => setRescheduleAnnouncement(null), 10000);
+    return () => clearTimeout(timer);
+  }, [rescheduleAnnouncement]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -101,6 +149,7 @@ export default function TVDisplay() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {rescheduleAnnouncement && <View style={styles.announcementOverlay}><View style={styles.announcementCard}><Ionicons name="calendar" size={56} color="#2196F3" /><Text style={styles.announcementTitle}>CONSULTATION RESCHEDULED</Text><Text style={styles.announcementStudent}>{rescheduleAnnouncement.student_name}</Text><Text style={styles.announcementDate}>{rescheduleAnnouncement.date}</Text><Text style={styles.announcementTime}>{rescheduleAnnouncement.time}</Text><Text style={styles.announcementHint}>Returning to the queue display shortly</Text></View></View>}
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
@@ -124,6 +173,10 @@ export default function TVDisplay() {
         </View>
 
         <View style={styles.headerRight}>
+          <TouchableOpacity onPress={activateSound} style={[styles.soundButton, soundReady && styles.soundButtonEnabled]}>
+            <Ionicons name={soundReady ? 'volume-high' : 'volume-mute'} size={16} color="#FFFFFF" />
+            <Text style={styles.soundButtonText}>{soundReady ? 'Sound on' : 'Enable sound'}</Text>
+          </TouchableOpacity>
           <Text style={styles.time}>{timeStr}</Text>
           <Text style={styles.date}>{dateStr}</Text>
         </View>
@@ -135,10 +188,14 @@ export default function TVDisplay() {
           <View key={f.school_id} testID={`tv-faculty-${f.school_id}`} style={styles.card}>
             {/* Left: Avatar with status ring */}
             <View style={styles.avatarWrap}>
-              <View style={[styles.avatarRing, { borderColor: getStatusColor(f.availability_status) }]}>
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>{getInitials(f.full_name)}</Text>
-                </View>
+                <View style={[styles.avatarRing, { borderColor: getStatusColor(f.availability_status) }]}>
+                  <View style={styles.avatar}>
+                    {f.profile_image ? (
+                      <Image source={{ uri: f.profile_image }} style={styles.avatarImage} />
+                    ) : (
+                      <Text style={styles.avatarText}>{getInitials(f.full_name)}</Text>
+                    )}
+                  </View>
               </View>
               <View style={[styles.statusDot, { backgroundColor: getStatusColor(f.availability_status) }]} />
             </View>
@@ -157,7 +214,7 @@ export default function TVDisplay() {
               {f.now_serving ? (
                 <View style={styles.queueRow}>
                   <Text style={styles.queueLabel}>NOW SERVING</Text>
-                  <Text style={styles.queueNumber}>#{f.now_serving.queue_number}</Text>
+                  <Text style={styles.queueNumber}>{f.now_serving.queue_number}</Text>
                   {f.waiting_count > 0 && (
                     <Text style={styles.queueWaiting}>+{f.waiting_count} waiting</Text>
                   )}
@@ -165,7 +222,7 @@ export default function TVDisplay() {
               ) : f.waiting_count > 0 ? (
                 <View style={styles.queueRow}>
                   <Text style={styles.queueLabel}>NEXT UP</Text>
-                  <Text style={styles.queueNumberNext}>#{f.next_queue_numbers[0]}</Text>
+                  <Text style={styles.queueNumberNext}>{f.next_queue_numbers[0]}</Text>
                   {f.waiting_count > 1 && (
                     <Text style={styles.queueWaiting}>+{f.waiting_count - 1} more</Text>
                   )}
@@ -212,6 +269,13 @@ const cardWidth = `${(100 / columnCount) - (gap * (columnCount - 1) / (columnCou
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0F172A' },
+  announcementOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 20, backgroundColor: 'rgba(15, 23, 42, 0.94)', alignItems: 'center', justifyContent: 'center', padding: 32 },
+  announcementCard: { width: '90%', maxWidth: 760, alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 24, padding: 42, borderWidth: 4, borderColor: '#2196F3' },
+  announcementTitle: { marginTop: 14, color: '#2196F3', fontSize: 22, fontWeight: '800', letterSpacing: 1 },
+  announcementStudent: { marginTop: 22, color: '#0F172A', fontSize: 36, fontWeight: '800', textAlign: 'center' },
+  announcementDate: { marginTop: 18, color: '#1E293B', fontSize: 26, fontWeight: '700' },
+  announcementTime: { marginTop: 6, color: '#2196F3', fontSize: 30, fontWeight: '800' },
+  announcementHint: { marginTop: 28, color: '#64748B', fontSize: 14 },
   loadingContainer: { flex: 1, backgroundColor: '#0F172A', alignItems: 'center', justifyContent: 'center' },
   header: {
     flexDirection: 'row',
@@ -242,6 +306,9 @@ const styles = StyleSheet.create({
   summaryDot: { width: 8, height: 8, borderRadius: 4 },
   summaryChipText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
   headerRight: { alignItems: 'flex-end' },
+  soundButton: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, backgroundColor: '#64748B' },
+  soundButtonEnabled: { backgroundColor: '#16A34A' },
+  soundButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
   time: { fontSize: 24, fontWeight: '700', color: '#2196F3', fontVariant: ['tabular-nums'] },
   date: { fontSize: 11, color: '#94A3B8', marginTop: 2 },
   grid: {
@@ -280,6 +347,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  avatarImage: { width: '100%', height: '100%', borderRadius: 27 },
   avatarText: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
   statusDot: {
     position: 'absolute',

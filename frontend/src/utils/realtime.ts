@@ -20,12 +20,17 @@ export function websocketUrl(facultyId?: string, token?: string) {
 export class RealtimeClient {
   private socket: WebSocket | null = null;
   private listeners = new Set<Listener>();
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
+  private closedByClient = false;
 
   constructor(private readonly facultyId?: string, private readonly token?: string) {}
 
   connect() {
-    if (this.socket) return;
+    if (this.socket || this.reconnectTimer) return;
+    this.closedByClient = false;
     const socket = new WebSocket(websocketUrl(this.facultyId, this.token));
+    socket.onopen = () => { this.reconnectAttempts = 0; };
     socket.onmessage = ({ data }) => {
       try {
         const event = JSON.parse(data) as RealtimeEvent;
@@ -34,17 +39,36 @@ export class RealtimeClient {
         console.warn('Ignoring invalid real-time event', error);
       }
     };
-    socket.onclose = () => { this.socket = null; };
+    socket.onclose = () => {
+      if (this.socket === socket) this.socket = null;
+      if (!this.closedByClient) this.scheduleReconnect();
+    };
     socket.onerror = () => { socket.close(); };
     this.socket = socket;
   }
 
+  private scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    // Retry quickly after a brief Wi-Fi interruption, then back off to 30 seconds.
+    const delay = Math.min(1000 * 2 ** this.reconnectAttempts, 30000);
+    this.reconnectAttempts += 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
+  }
+
   subscribe(listener: Listener) {
     this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   disconnect() {
+    this.closedByClient = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     this.socket?.close();
     this.socket = null;
     this.listeners.clear();

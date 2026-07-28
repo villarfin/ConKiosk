@@ -11,8 +11,8 @@ Complete guide to run the ConKiosk system on your Raspberry Pi 5.
                     │   Raspberry Pi 5     │
                     │  ─────────────────   │
                     │  • FastAPI Backend   │◄──────┐
-                    │  • MongoDB           │       │
-                    │  • Socket.IO Server  │       │ Local WiFi
+                    │  • PostgreSQL        │       │
+                    │  • WebSocket Server  │       │ Local WiFi
                     │  • Port 8001         │       │
                     └──────────┬───────────┘       │
                                │                    │
@@ -58,15 +58,10 @@ sudo apt update && sudo apt upgrade -y
 # Install Python 3.11+ and pip
 sudo apt install -y python3 python3-pip python3-venv git
 
-# Install MongoDB (using official Debian package)
-curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor
-echo "deb [ arch=arm64,amd64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] http://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-sudo apt update
-sudo apt install -y mongodb-org
-
-# Start MongoDB
-sudo systemctl enable mongod
-sudo systemctl start mongod
+# Install PostgreSQL and create a dedicated production database/user.
+sudo apt install -y postgresql
+sudo -u postgres createuser --pwprompt conkiosk
+sudo -u postgres createdb --owner=conkiosk conkiosk
 
 # Install Chromium (for kiosk & TV browser)
 sudo apt install -y chromium-browser unclutter
@@ -92,7 +87,7 @@ pip install -r requirements.txt
 # Create .env file from the template. Set production credentials before starting.
 cp .env.example .env
 
-# Test run (uses the Socket.IO-enabled ASGI application)
+# Test run (uses the WebSocket-enabled ASGI application)
 uvicorn server:socket_app --host 0.0.0.0 --port 8001
 
 # Development only: enable this destructive endpoint before seeding demo data.
@@ -109,7 +104,7 @@ Create `/etc/systemd/system/conkiosk.service`:
 ```ini
 [Unit]
 Description=ConKiosk Backend Server
-After=network.target mongod.service
+After=network.target postgresql.service
 
 [Service]
 Type=simple
@@ -248,8 +243,8 @@ server {
         proxy_set_header Connection "upgrade";
     }
 
-    location /socket.io/ {
-        proxy_pass http://localhost:8001/socket.io/;
+    location /ws {
+        proxy_pass http://localhost:8001/ws;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -308,8 +303,8 @@ Most USB QR scanners work as HID keyboards — no driver setup needed. Just:
 |---------|----------|
 | Mobile app can't connect | Check RPi IP + WiFi network. Verify port 8001 is not firewalled. |
 | Kiosk shows blank page | Ensure `nginx` is running and `expo export -p web` was run. |
-| Socket.IO not working | Check nginx `proxy_pass` for `/socket.io/` block. |
-| MongoDB won't start | Check `sudo journalctl -u mongod` for errors. Common: disk space. |
+| Real-time updates do not arrive | Check nginx's `/ws` proxy block and that phones can reach port 80. |
+| PostgreSQL won't start | Check `sudo journalctl -u postgresql` for errors. Common: disk space. |
 | QR scanner doesn't work | Test in any text editor first. Should type + press Enter automatically. |
 | Slow performance | RPi 5 with 8GB recommended. Enable swap if 4GB. |
 
@@ -318,11 +313,11 @@ Most USB QR scanners work as HID keyboards — no driver setup needed. Just:
 ## Security Recommendations (Before Production)
 
 1. Use `backend/.env.example` as the template and set `ENVIRONMENT=production`.
-2. Set a long random `JWT_SECRET_KEY`, MongoDB credentials, and exact `CORS_ORIGINS`.
+2. Set a long random `JWT_SECRET_KEY`, PostgreSQL credentials, and exact `CORS_ORIGINS`.
 3. Keep `ALLOW_SEED_DATA=false`; `/api/seed` must never run against real data.
-4. Enable MongoDB auth (`sudo systemctl edit mongod`).
+4. Restrict PostgreSQL to the local server and use a dedicated database user.
 5. Set up HTTPS via Let's Encrypt if exposing beyond the school network.
-6. Regularly back up and restore-test MongoDB: `mongodump --db conkiosk`.
+6. Regularly back up and restore-test PostgreSQL: `pg_dump -U conkiosk conkiosk > conkiosk.sql`.
 
 ---
 
@@ -330,5 +325,5 @@ Most USB QR scanners work as HID keyboards — no driver setup needed. Just:
 
 For issues, check:
 - Backend logs: `sudo journalctl -u conkiosk -f`
-- MongoDB logs: `sudo journalctl -u mongod -f`
+- PostgreSQL logs: `sudo journalctl -u postgresql -f`
 - Nginx logs: `sudo tail -f /var/log/nginx/error.log`

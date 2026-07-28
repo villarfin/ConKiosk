@@ -38,6 +38,7 @@ backend/.env
 frontend/.env
 !frontend/.env.example
 !backend/.env.example
+!backend/.env.test.example
 
 *token.json*
 *credentials.json*
@@ -94,6 +95,7 @@ android-sdk/
 *.env
 !backend/.env.example
 !frontend/.env.example
+!backend/.env.test.example
 credentials.json
 *.key
 .credentials

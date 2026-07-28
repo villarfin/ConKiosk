@@ -45,7 +45,7 @@ export default function ConfirmationScreen() {
         {/* Queue Number */}
         <View style={styles.queueCard}>
           <Text style={styles.queueLabel}>YOUR QUEUE NUMBER</Text>
-          <Text testID="queue-number" style={styles.queueNumber}>#{params.queue_number}</Text>
+          <Text testID="queue-number" style={styles.queueNumber}>{params.queue_number}</Text>
           <View style={styles.captureTimer}>
             <Ionicons name="camera-outline" size={16} color="#1565C0" />
             <Text style={styles.captureTimerText}>Take a photo — returning in {secondsRemaining}s</Text>
