@@ -1,0 +1,16 @@
+[Unit]
+Description=ConKiosk FastAPI backend
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=conkiosk
+WorkingDirectory=/home/conkiosk/ConKiosk/backend
+Environment=PATH=/home/conkiosk/ConKiosk/backend/venv/bin
+ExecStart=/home/conkiosk/ConKiosk/backend/venv/bin/uvicorn server:socket_app --host 0.0.0.0 --port 8001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+[Unit]
+Description=ConKiosk PostgreSQL backup
+
+[Service]
+Type=oneshot
+User=conkiosk
+WorkingDirectory=/home/conkiosk/ConKiosk
+ExecStart=/home/conkiosk/ConKiosk/deploy/backup-postgres.sh

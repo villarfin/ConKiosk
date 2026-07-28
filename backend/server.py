@@ -13,7 +13,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text, UniqueConstraint, and_, delete, func, or_, select
+from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text, UniqueConstraint, and_, delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from starlette.middleware.cors import CORSMiddleware
@@ -25,6 +25,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
 ALLOW_SEED_DATA = os.getenv("ALLOW_SEED_DATA", "false").lower() == "true"
+ADMIN_SCHOOL_ID = os.getenv("ADMIN_SCHOOL_ID", "").strip().upper()
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+ADMIN_NAME = os.getenv("ADMIN_NAME", "ConKiosk Administrator").strip()
 cors_origins = [value.strip() for value in os.getenv("CORS_ORIGINS", "http://localhost").split(",") if value.strip()]
 if not DATABASE_URL or not SECRET_KEY:
     raise RuntimeError("DATABASE_URL and JWT_SECRET_KEY must be set in backend/.env")
@@ -50,7 +53,10 @@ class Faculty(Base):
     email: Mapped[str] = mapped_column(String(255), default="")
     profile_image: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     availability_status: Mapped[str] = mapped_column(String(32), default="unavailable")
+    accepting_consultations: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    is_approved: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     office_hours: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    role: Mapped[str] = mapped_column(String(32), default="faculty", server_default="faculty")
 
 class StudentRecord(Base):
     __tablename__ = "students"
@@ -138,7 +144,7 @@ class FacultySignup(BaseModel):
 class FacultyProfileUpdate(BaseModel):
     full_name: Optional[str] = None; department: Optional[str] = None; office_location: Optional[str] = None
     email: Optional[str] = None; profile_image: Optional[str] = None; office_hours: Optional[str] = None
-class AvailabilityUpdate(BaseModel): status: str
+class AvailabilityUpdate(BaseModel): status: str; accepting_consultations: Optional[bool] = None
 class ConsultationAction(BaseModel):
     action: str; reschedule_date: Optional[str] = None; reschedule_time: Optional[str] = None; reason: Optional[str] = None
 class ConsultationUpdate(BaseModel):
@@ -146,6 +152,13 @@ class ConsultationUpdate(BaseModel):
 class ChangePasswordRequest(BaseModel): current_password: str; new_password: str
 class Student(BaseModel): student_id: str; full_name: str; program: str = ""; year_level: str; section: str
 class KioskConsultationRequest(BaseModel): faculty_school_id: str; topic: str; consultation_type: str = "individual"; students: list[Student]
+class AdminFacultyUpdate(BaseModel):
+    full_name: Optional[str] = Field(default=None, max_length=255)
+    department: Optional[str] = Field(default=None, max_length=255)
+    office_location: Optional[str] = Field(default=None, max_length=255)
+    email: Optional[str] = Field(default=None, max_length=255)
+    office_hours: Optional[str] = Field(default=None, max_length=255)
+    availability_status: Optional[str] = None
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
@@ -161,6 +174,12 @@ async def current_faculty(credentials: HTTPAuthorizationCredentials = Depends(se
     except JWTError: school_id = None
     faculty = await db.scalar(select(Faculty).where(Faculty.school_id == school_id)) if school_id else None
     if not faculty: raise HTTPException(401, "Invalid authentication credentials")
+    return faculty
+async def current_admin(faculty: Faculty = Depends(current_faculty)) -> Faculty:
+    if faculty.role != "admin": raise HTTPException(403, "Administrator access is required")
+    return faculty
+async def current_management_viewer(faculty: Faculty = Depends(current_faculty)) -> Faculty:
+    if faculty.role not in {"admin", "it_chair"}: raise HTTPException(403, "Administrator or IT Chair access is required")
     return faculty
 
 async def reset_queue_counter_if_empty(db: AsyncSession, faculty_school_id: str) -> None:
@@ -200,7 +219,24 @@ app = FastAPI(); api = APIRouter(prefix="/api")
 app.add_middleware(CORSMiddleware, allow_origins=cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 @app.on_event("startup")
 async def startup():
-    async with engine.begin() as conn: await conn.run_sync(Base.metadata.create_all)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        # create_all does not add columns to existing PostgreSQL tables.
+        await conn.execute(text("ALTER TABLE faculty ADD COLUMN IF NOT EXISTS role VARCHAR(32) NOT NULL DEFAULT 'faculty'"))
+        await conn.execute(text("ALTER TABLE faculty ADD COLUMN IF NOT EXISTS accepting_consultations BOOLEAN NOT NULL DEFAULT false"))
+        await conn.execute(text("ALTER TABLE faculty ADD COLUMN IF NOT EXISTS is_approved BOOLEAN NOT NULL DEFAULT true"))
+    if ADMIN_SCHOOL_ID and ADMIN_PASSWORD:
+        async with SessionLocal() as db:
+            admin = await db.scalar(select(Faculty).where(Faculty.school_id == ADMIN_SCHOOL_ID))
+            if not admin:
+                admin = Faculty(school_id=ADMIN_SCHOOL_ID, password_hash=pwd_context.hash(ADMIN_PASSWORD),
+                                full_name=ADMIN_NAME, department="System Administration", office_location="IT Office",
+                                email="", availability_status="unavailable", office_hours="", role="admin")
+                db.add(admin)
+            else:
+                admin.role = "admin"
+                admin.full_name = ADMIN_NAME or admin.full_name
+            await db.commit()
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket, faculty_id: Optional[str] = None, token: Optional[str] = None):
     # Public displays may subscribe without a faculty id.  Faculty-specific
@@ -222,6 +258,7 @@ async def ws_endpoint(websocket: WebSocket, faculty_id: Optional[str] = None, to
 async def login(payload: LoginRequest, db: AsyncSession = Depends(session)):
     faculty = await db.scalar(select(Faculty).where(Faculty.school_id == payload.school_id))
     if not faculty or not pwd_context.verify(payload.password, faculty.password_hash): raise HTTPException(401, "Incorrect school ID or password")
+    if not faculty.is_approved: raise HTTPException(403, "Your faculty registration is awaiting Administrator approval")
     token = jwt.encode({"sub": faculty.school_id, "exp": datetime.utcnow() + timedelta(days=30)}, SECRET_KEY, algorithm="HS256")
     return {"access_token": token, "token_type": "bearer", "faculty": serialize(faculty, True)}
 @api.post("/auth/signup", status_code=201)
@@ -243,9 +280,10 @@ async def signup(payload: FacultySignup, db: AsyncSession = Depends(session)):
         email=payload.email.strip().lower(),
         office_hours=payload.office_hours.strip(),
         availability_status="unavailable",
+        is_approved=False,
     )
     db.add(faculty); await db.commit(); await db.refresh(faculty)
-    return {"message": "Faculty account created. You can now sign in.", "faculty": serialize(faculty, True)}
+    return {"message": "Registration submitted. An Administrator must approve your account before you can sign in.", "faculty": serialize(faculty, True)}
 @api.get("/faculty/profile")
 async def profile(faculty: Faculty = Depends(current_faculty)): return serialize(faculty, True)
 @api.patch("/faculty/profile")
@@ -254,18 +292,114 @@ async def update_profile(payload: FacultyProfileUpdate, db: AsyncSession = Depen
     await db.commit(); await db.refresh(faculty); return serialize(faculty, True)
 @api.patch("/faculty/availability")
 async def availability(payload: AvailabilityUpdate, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
-    faculty.availability_status = payload.status; await db.commit()
-    await connections.send("availability_changed", {"faculty_id": faculty.school_id, "status": payload.status})
-    return {"message": "Availability updated", "status": payload.status}
+    if payload.status not in {"available", "busy", "unavailable"}: raise HTTPException(422, "Invalid availability status")
+    faculty.availability_status = payload.status
+    faculty.accepting_consultations = (payload.status == "available") if payload.accepting_consultations is None else payload.accepting_consultations
+    if payload.status == "unavailable": faculty.accepting_consultations = False
+    await db.commit()
+    event = {"faculty_id": faculty.school_id, "status": faculty.availability_status, "accepting_consultations": faculty.accepting_consultations}
+    await connections.send("availability_changed", event)
+    return {"message": "Availability updated", "status": faculty.availability_status, "accepting_consultations": faculty.accepting_consultations}
+@api.post("/auth/logout")
+async def logout(db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
+    faculty.availability_status = "unavailable"; faculty.accepting_consultations = False; await db.commit()
+    await connections.send("availability_changed", {"faculty_id": faculty.school_id, "status": "unavailable", "accepting_consultations": False})
+    return {"message": "Logged out and marked unavailable"}
 @api.post("/auth/change-password")
 async def change_password(payload: ChangePasswordRequest, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
     if not pwd_context.verify(payload.current_password, faculty.password_hash): raise HTTPException(400, "Current password is incorrect")
     faculty.password_hash = pwd_context.hash(payload.new_password); await db.commit(); return {"message": "Password changed successfully"}
 
+@api.get("/admin/summary")
+async def admin_summary(db: AsyncSession = Depends(session), admin: Faculty = Depends(current_management_viewer)):
+    today = now().date().isoformat()
+    faculty_count = await db.scalar(select(func.count()).select_from(Faculty).where(Faculty.role.in_(["faculty", "it_chair"])))
+    student_count = await db.scalar(select(func.count()).select_from(StudentRecord))
+    pending_count = await db.scalar(select(func.count()).select_from(ConsultationRequestRecord).where(ConsultationRequestRecord.status == "pending"))
+    today_count = await db.scalar(select(func.count()).select_from(ConsultationRecord).where(ConsultationRecord.date == today))
+    active_queues = await db.scalar(select(func.count()).select_from(QueueRecord).where(QueueRecord.status.in_(["waiting", "serving"])))
+    return {"faculty_count": faculty_count or 0, "student_count": student_count or 0,
+            "pending_requests": pending_count or 0, "today_consultations": today_count or 0,
+            "active_queue_entries": active_queues or 0, "admin_name": admin.full_name}
+
+@api.get("/admin/faculty")
+async def admin_faculty(db: AsyncSession = Depends(session), _: Faculty = Depends(current_management_viewer)):
+    rows = (await db.scalars(select(Faculty).where(Faculty.role.in_(["faculty", "it_chair"])).order_by(Faculty.full_name))).all()
+    output = []
+    for row in rows:
+        item = serialize(row, True)
+        item["total_consultations"] = await db.scalar(select(func.count()).select_from(ConsultationRecord).where(ConsultationRecord.faculty_school_id == row.school_id)) or 0
+        output.append(item)
+    return output
+
+@api.get("/admin/students")
+async def admin_students(db: AsyncSession = Depends(session), _: Faculty = Depends(current_management_viewer)):
+    return [serialize(row) for row in (await db.scalars(select(StudentRecord).order_by(StudentRecord.full_name))).all()]
+
+@api.get("/admin/faculty/{school_id}/consultations")
+async def admin_faculty_consultations(school_id: str, db: AsyncSession = Depends(session), _: Faculty = Depends(current_management_viewer)):
+    rows = (await db.scalars(select(ConsultationRecord).where(ConsultationRecord.faculty_school_id == school_id).order_by(ConsultationRecord.date.desc(), ConsultationRecord.time.desc()))).all()
+    return [serialize(row) for row in rows]
+
+@api.get("/admin/consultations/today")
+async def admin_today_consultations(db: AsyncSession = Depends(session), _: Faculty = Depends(current_management_viewer)):
+    today = now().date().isoformat()
+    rows = (await db.scalars(select(ConsultationRecord).where(ConsultationRecord.date == today).order_by(ConsultationRecord.time))).all()
+    return [serialize(row) for row in rows]
+
+@api.patch("/admin/faculty/{school_id}")
+async def admin_update_faculty(school_id: str, payload: AdminFacultyUpdate, db: AsyncSession = Depends(session), _: Faculty = Depends(current_admin)):
+    faculty = await db.scalar(select(Faculty).where(and_(Faculty.school_id == school_id, Faculty.role == "faculty")))
+    if not faculty: raise HTTPException(404, "Faculty account not found")
+    if payload.availability_status and payload.availability_status not in {"available", "busy", "unavailable"}:
+        raise HTTPException(422, "Invalid availability status")
+    for key, value in payload.model_dump(exclude_none=True).items(): setattr(faculty, key, value.strip() if isinstance(value, str) else value)
+    if faculty.availability_status == "unavailable": faculty.accepting_consultations = False
+    await db.commit(); await db.refresh(faculty)
+    await connections.send("availability_changed", {"faculty_id": faculty.school_id, "status": faculty.availability_status})
+    return serialize(faculty, True)
+
+@api.post("/admin/faculty/{school_id}/approve")
+async def approve_faculty(school_id: str, db: AsyncSession = Depends(session), _: Faculty = Depends(current_admin)):
+    faculty = await db.scalar(select(Faculty).where(and_(Faculty.school_id == school_id, Faculty.role == "faculty")))
+    if not faculty: raise HTTPException(404, "Faculty registration not found")
+    faculty.is_approved = True; await db.commit(); await db.refresh(faculty)
+    return {"message": f"{faculty.full_name} is approved", "faculty": serialize(faculty, True)}
+
+@api.post("/admin/it-chair/{school_id}")
+async def assign_it_chair(school_id: str, db: AsyncSession = Depends(session), _: Faculty = Depends(current_admin)):
+    nominee = await db.scalar(select(Faculty).where(and_(Faculty.school_id == school_id, Faculty.role.in_(["faculty", "it_chair"]))))
+    if not nominee: raise HTTPException(404, "Active faculty account not found")
+    for chair in (await db.scalars(select(Faculty).where(Faculty.role == "it_chair"))).all(): chair.role = "faculty"
+    nominee.role = "it_chair"; nominee.availability_status = "unavailable"; nominee.accepting_consultations = False
+    await db.commit()
+    await connections.send("availability_changed", {"faculty_id": nominee.school_id, "status": "unavailable", "accepting_consultations": False})
+    return {"message": f"{nominee.full_name} is now the IT Chair", "it_chair": serialize(nominee, True)}
+
+@api.delete("/admin/it-chair")
+async def remove_it_chair(db: AsyncSession = Depends(session), _: Faculty = Depends(current_admin)):
+    chair = await db.scalar(select(Faculty).where(Faculty.role == "it_chair"))
+    if not chair: raise HTTPException(404, "No IT Chair is currently assigned")
+    chair.role = "faculty"; await db.commit()
+    return {"message": f"{chair.full_name} returned to normal faculty access"}
+
+@api.delete("/admin/faculty/{school_id}")
+async def delete_faculty_account(school_id: str, db: AsyncSession = Depends(session), _: Faculty = Depends(current_admin)):
+    faculty = await db.scalar(select(Faculty).where(and_(Faculty.school_id == school_id, Faculty.role.in_(["faculty", "it_chair"]))))
+    if not faculty: raise HTTPException(404, "Faculty account not found")
+    # Keep completed consultation history for institutional reporting, but remove live account/queue data.
+    await db.execute(delete(NotificationRecord).where(NotificationRecord.faculty_school_id == school_id))
+    await db.execute(delete(ConsultationRequestRecord).where(ConsultationRequestRecord.faculty_school_id == school_id))
+    await db.execute(delete(QueueRecord).where(QueueRecord.faculty_school_id == school_id))
+    await db.execute(delete(QueueCounter).where(QueueCounter.faculty_school_id == school_id))
+    await db.delete(faculty); await db.commit()
+    await connections.send("availability_changed", {"faculty_id": school_id, "status": "unavailable", "accepting_consultations": False})
+    return {"message": "Faculty account deleted; completed consultation records were retained"}
+
 @api.get("/kiosk/faculty")
 async def kiosk_faculty(db: AsyncSession = Depends(session)):
-    rows = (await db.scalars(select(Faculty).order_by(Faculty.full_name))).all()
-    return [{key: serialize(row, True)[key] for key in ("school_id", "full_name", "department", "office_location", "profile_image", "availability_status", "office_hours")} for row in rows]
+    rows = (await db.scalars(select(Faculty).where(and_(Faculty.role.in_(["faculty", "it_chair"]), Faculty.is_approved == True)).order_by(Faculty.full_name))).all()
+    return [{key: serialize(row, True)[key] for key in ("school_id", "full_name", "department", "office_location", "profile_image", "availability_status", "accepting_consultations", "office_hours")} for row in rows]
 @api.get("/kiosk/students/{student_id}")
 async def student_lookup(student_id: str, db: AsyncSession = Depends(session)):
     row = await db.scalar(select(StudentRecord).where(StudentRecord.student_id == student_id))
@@ -431,7 +565,7 @@ async def dashboard_stats(db: AsyncSession = Depends(session), faculty: Faculty 
     pending_requests = await db.scalar(select(func.count()).select_from(ConsultationRequestRecord).where(and_(ConsultationRequestRecord.faculty_school_id == faculty.school_id, ConsultationRequestRecord.status == "pending")))
     monthly_count = await db.scalar(select(func.count()).select_from(ConsultationRecord).where(and_(scope, ConsultationRecord.date.like(f"{month_prefix}%"))))
     upcoming = (await db.scalars(select(ConsultationRecord).where(and_(scope, ConsultationRecord.status.in_(["scheduled", "ongoing"]), ConsultationRecord.date >= today)).order_by(ConsultationRecord.date, ConsultationRecord.time).limit(5))).all()
-    return {"today_count": today_count or 0, "pending_requests": pending_requests or 0, "monthly_count": monthly_count or 0, "availability_status": faculty.availability_status, "upcoming_consultations": [serialize(row) for row in upcoming]}
+    return {"today_count": today_count or 0, "pending_requests": pending_requests or 0, "monthly_count": monthly_count or 0, "availability_status": faculty.availability_status, "accepting_consultations": faculty.accepting_consultations, "upcoming_consultations": [serialize(row) for row in upcoming]}
 
 @api.get("/notifications")
 async def notifications(unread_only: bool = False, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
@@ -450,7 +584,7 @@ async def notifications_read(db: AsyncSession = Depends(session), faculty: Facul
 @api.get("/tv-display/status")
 async def tv_status(db: AsyncSession = Depends(session)):
     output = []
-    for faculty in (await db.scalars(select(Faculty).order_by(Faculty.full_name))).all():
+    for faculty in (await db.scalars(select(Faculty).where(Faculty.role.in_(["faculty", "it_chair"])).order_by(Faculty.full_name))).all():
         queue = (await db.scalars(select(QueueRecord).where(and_(QueueRecord.faculty_school_id == faculty.school_id, QueueRecord.status.in_(["waiting", "serving"]))).order_by(QueueRecord.queue_number))).all(); serving = next((item for item in queue if item.status == "serving"), None); waiting = [item for item in queue if item.status == "waiting"]
         output.append({"school_id": faculty.school_id, "full_name": faculty.full_name, "department": faculty.department, "office_location": faculty.office_location, "profile_image": faculty.profile_image, "availability_status": faculty.availability_status, "now_serving": {"queue_number": queue_label(serving.queue_number), "student_names": serving.student_names, "topic": serving.topic} if serving else None, "waiting_count": len(waiting), "next_queue_numbers": [queue_label(item.queue_number) for item in waiting[:5]]})
     return output
