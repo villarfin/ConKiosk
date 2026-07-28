@@ -11,6 +11,8 @@ load_dotenv(Path(__file__).resolve().parents[2] / "frontend" / ".env")
 BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "").rstrip("/")
 if not BASE_URL:
     raise RuntimeError("EXPO_PUBLIC_BACKEND_URL is required for tests")
+if os.environ.get("RUN_INTEGRATION_TESTS", "").lower() != "true":
+    raise RuntimeError("Set RUN_INTEGRATION_TESTS=true to run data-changing integration tests")
 
 TEST_SCHOOL_ID = "FAC2024001"
 TEST_PASSWORD = "password123"

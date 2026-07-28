@@ -13,13 +13,14 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text, UniqueConstraint, and_, func, or_, select
+from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text, UniqueConstraint, and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from starlette.middleware.cors import CORSMiddleware
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / ".env")
+# Select .env.test explicitly for the isolated integration environment.
+load_dotenv(ROOT_DIR / os.getenv("CONKIOSK_ENV_FILE", ".env"))
 DATABASE_URL = os.getenv("DATABASE_URL")
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
@@ -36,6 +37,7 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 class Base(DeclarativeBase): pass
 def id_value() -> str: return str(uuid.uuid4())
 def now() -> datetime: return datetime.utcnow()
+def queue_label(number: int) -> str: return f"A{number:03d}"
 
 class Faculty(Base):
     __tablename__ = "faculty"
@@ -125,6 +127,14 @@ class NotificationRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 class LoginRequest(BaseModel): school_id: str; password: str
+class FacultySignup(BaseModel):
+    school_id: str
+    password: str
+    full_name: str
+    department: str
+    office_location: str
+    email: str
+    office_hours: str
 class FacultyProfileUpdate(BaseModel):
     full_name: Optional[str] = None; department: Optional[str] = None; office_location: Optional[str] = None
     email: Optional[str] = None; profile_image: Optional[str] = None; office_hours: Optional[str] = None
@@ -152,6 +162,24 @@ async def current_faculty(credentials: HTTPAuthorizationCredentials = Depends(se
     faculty = await db.scalar(select(Faculty).where(Faculty.school_id == school_id)) if school_id else None
     if not faculty: raise HTTPException(401, "Invalid authentication credentials")
     return faculty
+
+async def reset_queue_counter_if_empty(db: AsyncSession, faculty_school_id: str) -> None:
+    """Start a new queue at #1 after its last active entry has left the queue."""
+    active_count = await db.scalar(select(func.count()).select_from(QueueRecord).where(and_(
+        QueueRecord.faculty_school_id == faculty_school_id,
+        QueueRecord.status.in_(["waiting", "serving"]),
+    )))
+    if not active_count:
+        # Queue numbers are reused from #1 for a new, empty queue. Closed queue
+        # entries are no longer needed by the live board (consultation history
+        # retains its own queue-number snapshot).
+        await db.execute(delete(QueueRecord).where(and_(
+            QueueRecord.faculty_school_id == faculty_school_id,
+            QueueRecord.status.in_(["completed", "cancelled"]),
+        )))
+        counter = await db.get(QueueCounter, faculty_school_id)
+        if counter:
+            counter.last_number = 0
 
 class Connections:
     def __init__(self): self.all: set[WebSocket] = set(); self.faculty: dict[str, set[WebSocket]] = {}
@@ -196,6 +224,28 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(session)):
     if not faculty or not pwd_context.verify(payload.password, faculty.password_hash): raise HTTPException(401, "Incorrect school ID or password")
     token = jwt.encode({"sub": faculty.school_id, "exp": datetime.utcnow() + timedelta(days=30)}, SECRET_KEY, algorithm="HS256")
     return {"access_token": token, "token_type": "bearer", "faculty": serialize(faculty, True)}
+@api.post("/auth/signup", status_code=201)
+async def signup(payload: FacultySignup, db: AsyncSession = Depends(session)):
+    school_id = payload.school_id.strip().upper()
+    required_fields = [school_id, payload.full_name.strip(), payload.department.strip(),
+                       payload.office_location.strip(), payload.email.strip(), payload.office_hours.strip()]
+    if not all(required_fields): raise HTTPException(422, "All registration fields are required")
+    if len(payload.password) < 8: raise HTTPException(422, "Password must be at least 8 characters")
+    if "@" not in payload.email: raise HTTPException(422, "Enter a valid email address")
+    if await db.scalar(select(Faculty).where(Faculty.school_id == school_id)):
+        raise HTTPException(409, "A faculty account with this School ID already exists")
+    faculty = Faculty(
+        school_id=school_id,
+        password_hash=pwd_context.hash(payload.password),
+        full_name=payload.full_name.strip(),
+        department=payload.department.strip(),
+        office_location=payload.office_location.strip(),
+        email=payload.email.strip().lower(),
+        office_hours=payload.office_hours.strip(),
+        availability_status="unavailable",
+    )
+    db.add(faculty); await db.commit(); await db.refresh(faculty)
+    return {"message": "Faculty account created. You can now sign in.", "faculty": serialize(faculty, True)}
 @api.get("/faculty/profile")
 async def profile(faculty: Faculty = Depends(current_faculty)): return serialize(faculty, True)
 @api.patch("/faculty/profile")
@@ -233,44 +283,100 @@ async def kiosk_request(payload: KioskConsultationRequest, db: AsyncSession = De
     if not faculty: raise HTTPException(404, "Faculty not found")
     for student in payload.students:
         if not await db.scalar(select(StudentRecord).where(StudentRecord.student_id == student.student_id)): db.add(StudentRecord(**student.model_dump()))
+    # Remove historical closed entries before allocating a fresh queue number.
+    # This keeps the A001 reset rule compatible with the database's per-faculty
+    # unique queue-number constraint, including records created by older versions.
+    active_count = await db.scalar(select(func.count()).select_from(QueueRecord).where(and_(
+        QueueRecord.faculty_school_id == faculty.school_id,
+        QueueRecord.status.in_(["waiting", "serving"]),
+    )))
+    if not active_count:
+        await db.execute(delete(QueueRecord).where(and_(
+            QueueRecord.faculty_school_id == faculty.school_id,
+            QueueRecord.status.in_(["completed", "cancelled"]),
+        )))
     counter = await db.scalar(select(QueueCounter).where(QueueCounter.faculty_school_id == faculty.school_id).with_for_update())
     if not counter: counter = QueueCounter(faculty_school_id=faculty.school_id, last_number=0); db.add(counter); await db.flush()
+    elif not active_count: counter.last_number = 0
     counter.last_number += 1; names = [student.full_name for student in payload.students]; ids = [student.student_id for student in payload.students]
     queue = QueueRecord(faculty_school_id=faculty.school_id, queue_number=counter.last_number, student_ids=ids, student_names=names, topic=payload.topic, consultation_type=payload.consultation_type)
     db.add(queue); await db.flush(); display = names[0] if len(names) == 1 else f"{names[0]} +{len(names)-1} more"
     db.add(ConsultationRequestRecord(faculty_school_id=faculty.school_id, student_id=",".join(ids), student_name=display, student_program=f"{payload.students[0].program} • {payload.students[0].year_level} - {payload.students[0].section}", topic=payload.topic, preferred_date=now().date().isoformat(), preferred_time="Walk-in", queue_id=queue.id, queue_number=queue.queue_number, consultation_type=payload.consultation_type))
     db.add(NotificationRecord(faculty_school_id=faculty.school_id, type="new_request", title="New Kiosk Consultation Request", message=f"{display} requested consultation (Queue #{queue.queue_number})")); await db.commit()
-    await connections.send("new_consultation_request", {"faculty_id": faculty.school_id, "queue_number": queue.queue_number}, faculty.school_id); await connections.send("queue_updated", {"faculty_id": faculty.school_id})
-    return {"message": "Consultation request submitted", "queue_number": queue.queue_number, "queue_id": queue.id, "faculty_name": faculty.full_name, "faculty_office": faculty.office_location}
+    event_data = {"faculty_id": faculty.school_id, "queue_number": queue.queue_number}
+    await connections.send("new_consultation_request", event_data, faculty.school_id)
+    await connections.send("new_notification", event_data, faculty.school_id)
+    await connections.send("queue_updated", {"faculty_id": faculty.school_id})
+    return {"message": "Consultation request submitted", "queue_number": queue_label(queue.queue_number), "queue_id": queue.id, "faculty_name": faculty.full_name, "faculty_office": faculty.office_location}
 @api.get("/kiosk/queue/{faculty_school_id}")
 async def kiosk_queue(faculty_school_id: str, db: AsyncSession = Depends(session)):
-    rows = (await db.scalars(select(QueueRecord).where(and_(QueueRecord.faculty_school_id == faculty_school_id, QueueRecord.status.in_(["waiting", "serving"]))).order_by(QueueRecord.queue_number))).all(); return [serialize(row) for row in rows]
+    rows = (await db.scalars(select(QueueRecord).where(and_(QueueRecord.faculty_school_id == faculty_school_id, QueueRecord.status.in_(["waiting", "serving"]))).order_by(QueueRecord.queue_number))).all()
+    output = [serialize(row) for row in rows]
+    for item in output: item["queue_number"] = queue_label(item["queue_number"])
+    return output
 
 @api.get("/consultation-requests")
 async def requests(status: Optional[str] = None, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
     query = select(ConsultationRequestRecord).where(ConsultationRequestRecord.faculty_school_id == faculty.school_id)
     if status: query = query.where(ConsultationRequestRecord.status == status)
-    return [serialize(row) for row in (await db.scalars(query.order_by(ConsultationRequestRecord.created_at.desc()))).all()]
+    output = []
+    for row in (await db.scalars(query.order_by(ConsultationRequestRecord.created_at.desc()))).all():
+        item = serialize(row)
+        if row.queue_id:
+            queue = await db.get(QueueRecord, row.queue_id)
+            if queue:
+                item["student_names"] = queue.student_names
+                item["student_ids"] = queue.student_ids
+        output.append(item)
+    return output
 @api.get("/consultation-requests/{request_id}")
 async def request_detail(request_id: str, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
     row = await db.scalar(select(ConsultationRequestRecord).where(and_(ConsultationRequestRecord.id == request_id, ConsultationRequestRecord.faculty_school_id == faculty.school_id)))
     if not row: raise HTTPException(404, "Request not found")
-    return serialize(row)
+    item = serialize(row)
+    if row.queue_id and (queue := await db.get(QueueRecord, row.queue_id)):
+        item["student_names"] = queue.student_names
+        item["student_ids"] = queue.student_ids
+    return item
 @api.post("/consultation-requests/{request_id}/action")
 async def request_action(request_id: str, payload: ConsultationAction, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
     row = await db.scalar(select(ConsultationRequestRecord).where(and_(ConsultationRequestRecord.id == request_id, ConsultationRequestRecord.faculty_school_id == faculty.school_id)))
     if not row: raise HTTPException(404, "Request not found")
     if payload.action == "accept":
-        row.status = "accepted"; db.add(ConsultationRecord(faculty_school_id=faculty.school_id, student_id=row.student_id, student_name=row.student_name, student_program=row.student_program, topic=row.topic, date=row.preferred_date, time=row.preferred_time, status="scheduled", queue_id=row.queue_id, queue_number=row.queue_number, consultation_type=row.consultation_type)); event = "consultation_accepted"
+        row.status = "accepted"
+        if row.queue_id:
+            queue = await db.get(QueueRecord, row.queue_id)
+            if queue:
+                queue.status = "completed"
+                await reset_queue_counter_if_empty(db, faculty.school_id)
+        db.add(ConsultationRecord(faculty_school_id=faculty.school_id, student_id=row.student_id, student_name=row.student_name, student_program=row.student_program, topic=row.topic, date=row.preferred_date, time=row.preferred_time, status="scheduled", queue_id=row.queue_id, queue_number=row.queue_number, consultation_type=row.consultation_type)); event = "consultation_accepted"
     elif payload.action == "decline":
         row.status = "declined"; row.decline_reason = payload.reason; event = "queue_updated"
         if row.queue_id:
             queue = await db.get(QueueRecord, row.queue_id)
-            if queue: queue.status = "cancelled"
+            if queue:
+                queue.status = "cancelled"
+                await reset_queue_counter_if_empty(db, faculty.school_id)
     elif payload.action == "reschedule" and payload.reschedule_date and payload.reschedule_time:
         row.status = "rescheduled"; row.preferred_date = payload.reschedule_date; row.preferred_time = payload.reschedule_time; event = "consultation_rescheduled"
+        if row.queue_id:
+            queue = await db.get(QueueRecord, row.queue_id)
+            if queue:
+                queue.status = "cancelled"
+                await reset_queue_counter_if_empty(db, faculty.school_id)
     else: raise HTTPException(400, "Invalid action or missing reschedule details")
-    db.add(NotificationRecord(faculty_school_id=faculty.school_id, type=payload.action, title=f"Request {payload.action.title()}ed", message=f"Request from {row.student_name} was {payload.action}ed")); await db.commit(); await connections.send(event, {"faculty_id": faculty.school_id}, faculty.school_id); return {"message": f"Request {payload.action}ed", "status": row.status}
+    db.add(NotificationRecord(faculty_school_id=faculty.school_id, type=payload.action, title=f"Request {payload.action.title()}ed", message=f"Request from {row.student_name} was {payload.action}ed")); await db.commit()
+    event_data = {"faculty_id": faculty.school_id}
+    if payload.action == "reschedule":
+        event_data.update({"student_name": row.student_name, "date": row.preferred_date, "time": row.preferred_time})
+    await connections.send(event, event_data, faculty.school_id)
+    await connections.send("new_notification", event_data, faculty.school_id)
+    if payload.action == "reschedule":
+        await connections.send("consultation_rescheduled", event_data)
+    # Public kiosk and TV displays must receive faculty actions too.
+    await connections.send("queue_updated", event_data)
+    await connections.send("availability_changed", event_data)
+    return {"message": f"Request {payload.action}ed", "status": row.status}
 
 @api.get("/consultations")
 async def consultations(status: Optional[str] = None, search: Optional[str] = None, date_from: Optional[str] = None, date_to: Optional[str] = None, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
@@ -309,7 +415,9 @@ async def consultation_complete(consultation_id: str, db: AsyncSession = Depends
     row.duration = max(1, int((now() - row.updated_at).total_seconds() / 60)); row.status = "completed"; row.updated_at = now(); faculty.availability_status = "available"
     if row.queue_id:
         queue = await db.get(QueueRecord, row.queue_id)
-        if queue: queue.status = "completed"
+        if queue:
+            queue.status = "completed"
+            await reset_queue_counter_if_empty(db, faculty.school_id)
     await db.commit()
     for event in ("consultation_completed", "queue_updated", "availability_changed"): await connections.send(event, {"faculty_id": faculty.school_id})
     return {"message": "Consultation completed", "duration_minutes": row.duration}
@@ -344,12 +452,45 @@ async def tv_status(db: AsyncSession = Depends(session)):
     output = []
     for faculty in (await db.scalars(select(Faculty).order_by(Faculty.full_name))).all():
         queue = (await db.scalars(select(QueueRecord).where(and_(QueueRecord.faculty_school_id == faculty.school_id, QueueRecord.status.in_(["waiting", "serving"]))).order_by(QueueRecord.queue_number))).all(); serving = next((item for item in queue if item.status == "serving"), None); waiting = [item for item in queue if item.status == "waiting"]
-        output.append({"school_id": faculty.school_id, "full_name": faculty.full_name, "department": faculty.department, "office_location": faculty.office_location, "availability_status": faculty.availability_status, "now_serving": {"queue_number": serving.queue_number, "student_names": serving.student_names, "topic": serving.topic} if serving else None, "waiting_count": len(waiting), "next_queue_numbers": [item.queue_number for item in waiting[:5]]})
+        output.append({"school_id": faculty.school_id, "full_name": faculty.full_name, "department": faculty.department, "office_location": faculty.office_location, "profile_image": faculty.profile_image, "availability_status": faculty.availability_status, "now_serving": {"queue_number": queue_label(serving.queue_number), "student_names": serving.student_names, "topic": serving.topic} if serving else None, "waiting_count": len(waiting), "next_queue_numbers": [queue_label(item.queue_number) for item in waiting[:5]]})
     return output
 @api.post("/seed")
-async def seed_disabled():
-    if not ALLOW_SEED_DATA: raise HTTPException(403, "Demo seeding is disabled")
-    raise HTTPException(501, "Seeding is intentionally not implemented for the PostgreSQL production backend")
+async def seed_demo_data(db: AsyncSession = Depends(session)):
+    """Reset demo data. This is deliberately unavailable in production."""
+    if not ALLOW_SEED_DATA or ENVIRONMENT not in {"development", "test"}:
+        raise HTTPException(403, "Demo seeding is only available in development or test environments")
+    for model in (NotificationRecord, ConsultationRecord, ConsultationRequestRecord,
+                  QueueRecord, QueueCounter, StudentRecord, Faculty):
+        await db.execute(delete(model))
+
+    faculty_data = [
+        ("FAC2024001", "Dr. Maria Santos", "Computer Science", "Room 301, Science Building"),
+        ("FAC2024002", "Prof. Juan Reyes", "Information Technology", "Room 202, Technology Building"),
+        ("FAC2024003", "Dr. Elena Cruz", "Mathematics", "Room 104, Mathematics Building"),
+        ("FAC2024004", "Prof. Antonio Villar", "Engineering", "Room 401, Engineering Building"),
+        ("FAC2024005", "Dr. Sofia Mendoza", "Business Administration", "Room 205, Business Building"),
+        ("FAC2024006", "Prof. Roberto Lim", "Computer Science", "Room 302, Science Building"),
+    ]
+    for school_id, full_name, department, office_location in faculty_data:
+        db.add(Faculty(school_id=school_id, password_hash=pwd_context.hash("password123"),
+                       full_name=full_name, department=department, office_location=office_location,
+                       email=f"{school_id.lower()}@test.local", availability_status="available",
+                       office_hours="Mon-Fri 9:00 AM - 5:00 PM"))
+    students = [
+        ("STU2024101", "John Dela Cruz", "BSCS", "4th Year", "BSCS-4A"),
+        ("STU2024102", "Jane Smith", "BSIT", "3rd Year", "BSIT-3A"),
+        ("STU2024103", "Miguel Torres", "BSCS", "4th Year", "BSCS-4A"),
+        ("STU2024104", "Ana Garcia", "BSIT", "2nd Year", "BSIT-2A"),
+        ("STU2024105", "Paolo Ramos", "BSBA", "3rd Year", "BSBA-3A"),
+        ("STU2024106", "Lea Flores", "BS Math", "2nd Year", "BSM-2A"),
+        ("STU2024107", "Carlo Diaz", "BSCE", "4th Year", "BSCE-4A"),
+        ("STU2024108", "Mia Tan", "BSCS", "1st Year", "BSCS-1A"),
+    ]
+    for student_id, full_name, program, year_level, section in students:
+        db.add(StudentRecord(student_id=student_id, full_name=full_name, program=program,
+                             year_level=year_level, section=section))
+    await db.commit()
+    return {"message": "Test/demo data seeded", "faculty_count": len(faculty_data), "student_count": len(students)}
 
 app.include_router(api)
 socket_app = app
