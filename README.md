@@ -64,6 +64,30 @@ All four components live in **one codebase** in this repo.
 - PostgreSQL (local install or Docker)
 - Expo Go app on your phone (for mobile testing)
 
+### Start the whole system
+
+Run these services in separate terminals from the project folder:
+
+```bash
+# Terminal 1: start PostgreSQL (Linux systems using systemd)
+sudo systemctl start postgresql
+
+# Terminal 2: start the FastAPI API and WebSocket server
+cd backend
+source venv/bin/activate
+uvicorn server:socket_app --host 0.0.0.0 --port 8001 --reload
+
+# Terminal 3: detects the Pi's current LAN IP, then starts the frontend
+cd frontend
+yarn start:lan
+```
+
+When Expo is ready, open `http://localhost:8081/kiosk` for the student kiosk and
+`http://localhost:8081/tv` for the TV queue display. Scan the Expo QR code with
+Expo Go for the faculty mobile app. `yarn start:lan` detects the Raspberry Pi's
+current Wi-Fi/Ethernet address every time it starts, so changing Wi-Fi does not
+require editing `frontend/.env`. Keep the phone and Raspberry Pi on the same network.
+
 ### 1. Clone the repo
 ```bash
 git clone https://github.com/<your-username>/ConKiosk.git
