@@ -3,8 +3,7 @@ import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Dimensions, Imag
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { RealtimeClient } from '@/src/utils/realtime';
-
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+import { apiUrl } from '@/src/config/api';
 
 let announcementAudioContext: AudioContext | null = null;
 
@@ -67,7 +66,7 @@ export default function TVDisplay() {
 
   const loadData = useCallback(async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/tv-display/status`, { cache: 'no-store' });
+      const response = await fetch(apiUrl('/tv-display/status'), { cache: 'no-store' });
       if (!response.ok) throw new Error(`TV status request failed: ${response.status}`);
       const result = await response.json();
       setData(result);

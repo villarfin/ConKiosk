@@ -13,8 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { RealtimeClient } from '@/src/utils/realtime';
-
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+import { apiUrl } from '@/src/config/api';
 
 interface Faculty {
   school_id: string;
@@ -35,7 +34,7 @@ export default function KioskHome() {
 
   const loadFaculty = useCallback(async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/kiosk/faculty`);
+      const response = await fetch(apiUrl('/kiosk/faculty'));
       const data = await response.json();
       setFaculty(data);
     } catch (e) {

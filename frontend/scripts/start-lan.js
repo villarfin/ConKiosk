@@ -18,18 +18,19 @@ function addresses() {
 const available = addresses();
 const selected = available.find(({ name }) => preferredInterfaces.some((pattern) => pattern.test(name))) || available[0];
 
-if (!selected) {
-  console.error('No private LAN IPv4 address was found. Connect the Raspberry Pi to Wi-Fi or Ethernet, then try again.');
-  process.exit(1);
+const apiUrl = selected ? `http://${selected.address}:8001/api` : process.env.EXPO_PUBLIC_API_URL;
+if (selected) {
+  console.log(`Using ${selected.name} (${apiUrl}) for the ConKiosk development API.`);
+} else {
+  console.warn('No LAN IPv4 address is available. Starting Expo locally; restart this command after the Netless router assigns the Pi its LAN address.');
 }
 
-const backendUrl = `http://${selected.address}:8001`;
-console.log(`Using ${selected.name} (${backendUrl}) for the ConKiosk backend.`);
-
 const expo = path.join(process.cwd(), 'node_modules', '.bin', process.platform === 'win32' ? 'expo.cmd' : 'expo');
-const child = spawn(expo, ['start', '--lan'], {
+const child = spawn(expo, ['start', selected ? '--lan' : '--localhost'], {
   cwd: process.cwd(),
-  env: { ...process.env, EXPO_PUBLIC_BACKEND_URL: backendUrl },
+  // Use the central configuration key. This intentionally overrides any stale
+  // .env value when a developer changes Wi-Fi networks.
+  env: { ...process.env, ...(apiUrl ? { EXPO_PUBLIC_API_URL: apiUrl } : {}) },
   stdio: 'inherit',
 });
 

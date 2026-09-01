@@ -5,6 +5,7 @@ import { LogBox } from "react-native";
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/contexts/AuthContext";
+import { ServerConnectionStatus } from "@/src/components/ServerConnectionStatus";
 
 
 // Disable logbox errors etc so that users can see the app
@@ -33,6 +34,7 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <Stack screenOptions={{ headerShown: false }} />
+      <ServerConnectionStatus />
     </AuthProvider>
   );
 }

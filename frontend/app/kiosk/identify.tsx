@@ -14,9 +14,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { apiUrl } from '@/src/config/api';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 // USTP–CDO programs recognized from QR content. The text shown to the student
 // is the standardized value on the right; the values on the left are QR forms.
@@ -109,7 +109,7 @@ export default function IdentifyScreen() {
 
     setLookingUp(true);
     try {
-      const response = await fetch(`${BACKEND_URL}/api/kiosk/students/${studentId}`);
+      const response = await fetch(apiUrl(`/kiosk/students/${studentId}`));
       if (response.ok) {
         const student: Student = await response.json();
         // Scanning only verifies identity. These are required for the current request.
@@ -200,7 +200,7 @@ export default function IdentifyScreen() {
 
     // Save student to backend
     try {
-      await fetch(`${BACKEND_URL}/api/kiosk/students`, {
+      await fetch(apiUrl('/kiosk/students'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(currentStudent),

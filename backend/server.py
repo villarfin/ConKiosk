@@ -29,6 +29,12 @@ ADMIN_SCHOOL_ID = os.getenv("ADMIN_SCHOOL_ID", "").strip().upper()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 ADMIN_NAME = os.getenv("ADMIN_NAME", "ConKiosk Administrator").strip()
 cors_origins = [value.strip() for value in os.getenv("CORS_ORIGINS", "http://localhost").split(",") if value.strip()]
+lan_origin = os.getenv("LAN_ORIGIN", "").strip().rstrip("/")
+if lan_origin:
+    # A deployed web build is served from the LAN origin; Expo/Metro development
+    # is served from port 8081. Keep the allowlist explicit rather than using *.
+    cors_origins.extend([lan_origin, f"{lan_origin}:8081"])
+cors_origins = list(dict.fromkeys(cors_origins))
 if not DATABASE_URL or not SECRET_KEY:
     raise RuntimeError("DATABASE_URL and JWT_SECRET_KEY must be set in backend/.env")
 if ENVIRONMENT == "production" and "*" in cors_origins:
@@ -217,6 +223,14 @@ connections = Connections()
 
 app = FastAPI(); api = APIRouter(prefix="/api")
 app.add_middleware(CORSMiddleware, allow_origins=cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+@api.get("/health")
+async def health(db: AsyncSession = Depends(session)):
+    """Public local-service health check; no internet is involved."""
+    try:
+        await db.execute(text("SELECT 1"))
+    except Exception:
+        raise HTTPException(503, "ConKiosk database is unavailable")
+    return {"status": "ok", "service": "conkiosk-api", "database": "ok"}
 @app.on_event("startup")
 async def startup():
     async with engine.begin() as conn:

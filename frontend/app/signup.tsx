@@ -3,9 +3,9 @@ import { Alert, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, S
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { apiUrl } from '@/src/config/api';
 import { useAuth } from '@/src/contexts/AuthContext';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 export default function SignupScreen() {
   const router = useRouter();
@@ -21,7 +21,7 @@ export default function SignupScreen() {
     if (payload.password !== confirmPassword) return Alert.alert('Passwords do not match', 'Please enter the same password twice.');
     setLoading(true);
     try {
-      const response = await fetch(`${BACKEND_URL}/api/auth/signup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const response = await fetch(apiUrl('/auth/signup'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.detail || 'Could not create the account.');
       await login(payload.school_id, payload.password);

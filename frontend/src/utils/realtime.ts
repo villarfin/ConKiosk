@@ -5,10 +5,10 @@ export type RealtimeEvent = {
 
 type Listener = (event: RealtimeEvent) => void;
 
-const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+import { API_ORIGIN } from '@/src/config/api';
 
 export function websocketUrl(facultyId?: string, token?: string) {
-  const base = backendUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
+  const base = API_ORIGIN.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
   const params = new URLSearchParams();
   if (facultyId) params.set('faculty_id', facultyId);
   if (token) params.set('token', token);

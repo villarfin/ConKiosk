@@ -1,6 +1,5 @@
 import { storage } from '@/src/utils/storage';
-
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+import { apiUrl } from '@/src/config/api';
 
 export class ApiClient {
   private static async getHeaders(): Promise<HeadersInit> {
@@ -13,7 +12,7 @@ export class ApiClient {
 
   static async get(endpoint: string) {
     const headers = await this.getHeaders();
-    const response = await fetch(`${BACKEND_URL}/api${endpoint}`, {
+    const response = await fetch(apiUrl(endpoint), {
       method: 'GET',
       headers,
     });
@@ -27,7 +26,7 @@ export class ApiClient {
 
   static async post(endpoint: string, data?: any) {
     const headers = await this.getHeaders();
-    const response = await fetch(`${BACKEND_URL}/api${endpoint}`, {
+    const response = await fetch(apiUrl(endpoint), {
       method: 'POST',
       headers,
       body: data ? JSON.stringify(data) : undefined,
@@ -43,7 +42,7 @@ export class ApiClient {
 
   static async patch(endpoint: string, data?: any) {
     const headers = await this.getHeaders();
-    const response = await fetch(`${BACKEND_URL}/api${endpoint}`, {
+    const response = await fetch(apiUrl(endpoint), {
       method: 'PATCH',
       headers,
       body: data ? JSON.stringify(data) : undefined,
@@ -59,7 +58,7 @@ export class ApiClient {
 
   static async delete(endpoint: string) {
     const headers = await this.getHeaders();
-    const response = await fetch(`${BACKEND_URL}/api${endpoint}`, {
+    const response = await fetch(apiUrl(endpoint), {
       method: 'DELETE',
       headers,
     });

@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { storage } from '@/src/utils/storage';
 import { RealtimeClient } from '@/src/utils/realtime';
-
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+import { apiUrl } from '@/src/config/api';
 
 interface Faculty {
   _id: string;
@@ -71,7 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (schoolId: string, password: string): Promise<'faculty' | 'admin' | 'it_chair'> => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/auth/login`, {
+      const response = await fetch(apiUrl('/auth/login'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -107,7 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       // Tell the server first so the kiosk and TV stop offering this faculty immediately.
       if (token) {
-        await fetch(`${BACKEND_URL}/api/auth/logout`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+        await fetch(apiUrl('/auth/logout'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
       }
     } catch (error) {
       // Local sign-out must still succeed if Wi-Fi drops during the server request.

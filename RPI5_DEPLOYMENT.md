@@ -1,5 +1,8 @@
 # ConKiosk – Raspberry Pi 5 Deployment Guide
 
+> For the current secure offline-LAN deployment instructions, including Nginx,
+> PostgreSQL, firewall, and Expo Go, use [`LAN_OFFLINE_DEPLOYMENT.md`](LAN_OFFLINE_DEPLOYMENT.md).
+
 Complete guide to run the ConKiosk system on your Raspberry Pi 5.
 
 ---
@@ -111,7 +114,7 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/conkiosk/backend
 Environment="PATH=/home/pi/conkiosk/backend/venv/bin"
-ExecStart=/home/pi/conkiosk/backend/venv/bin/uvicorn server:socket_app --host 0.0.0.0 --port 8001
+ExecStart=/home/pi/conkiosk/backend/venv/bin/uvicorn server:socket_app --host 127.0.0.1 --port 8001
 Restart=always
 RestartSec=5
 
@@ -146,7 +149,7 @@ Note this IP — you'll need it for the mobile app and browser setup.
 In your Expo project's `frontend/.env`:
 
 ```
-EXPO_PUBLIC_BACKEND_URL=http://192.168.1.100:8001
+EXPO_PUBLIC_API_URL=http://192.168.1.100/api
 ```
 
 Rebuild the app with EAS Build and distribute the APK to faculty. The app will now connect to the RPi over WiFi.
@@ -215,7 +218,7 @@ On your dev machine (where you have Node):
 
 ```bash
 cd frontend
-# Set EXPO_PUBLIC_BACKEND_URL in frontend/.env to http://YOUR_RPI_IP:8001
+# Set EXPO_PUBLIC_API_URL in frontend/.env to http://YOUR_RPI_IP/api
 # before exporting so the built kiosk and TV can reach the API.
 npx expo export -p web
 ```

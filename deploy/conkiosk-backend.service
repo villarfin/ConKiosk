@@ -1,14 +1,16 @@
 [Unit]
 Description=ConKiosk FastAPI backend
-After=network-online.target postgresql.service
-Wants=network-online.target
+# The API and database are local services. Do not delay boot waiting for Wi-Fi,
+# Ethernet, DHCP, or an internet/WAN connection.
+After=postgresql.service
+Requires=postgresql.service
 
 [Service]
 Type=simple
 User=conkiosk
 WorkingDirectory=/home/conkiosk/ConKiosk/backend
 Environment=PATH=/home/conkiosk/ConKiosk/backend/venv/bin
-ExecStart=/home/conkiosk/ConKiosk/backend/venv/bin/uvicorn server:socket_app --host 0.0.0.0 --port 8001
+ExecStart=/home/conkiosk/ConKiosk/backend/venv/bin/uvicorn server:socket_app --host 127.0.0.1 --port 8001
 Restart=always
 RestartSec=5
 

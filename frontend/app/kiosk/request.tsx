@@ -13,9 +13,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { apiUrl } from '@/src/config/api';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 interface Student {
   student_id: string;
@@ -48,7 +48,7 @@ export default function RequestScreen() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
     try {
-      const response = await fetch(`${BACKEND_URL}/api/kiosk/consultation-request`, {
+      const response = await fetch(apiUrl('/kiosk/consultation-request'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,

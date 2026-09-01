@@ -122,7 +122,7 @@ yarn install
 
 # Create .env
 cat > .env <<EOF
-EXPO_PUBLIC_BACKEND_URL=http://localhost:8001
+EXPO_PUBLIC_API_URL=http://localhost:8001/api
 EOF
 
 # Start Expo
@@ -140,8 +140,8 @@ Do not test using the production database. Create a separate PostgreSQL database
 use `backend/.env.test.example` as its configuration template. The integration suite
 intentionally requires `RUN_INTEGRATION_TESTS=true` before it can reset test data.
 
-For phone testing, set `EXPO_PUBLIC_BACKEND_URL` to the server's LAN IP (not
-`localhost`), run `yarn start`, and open the app in Expo Go on phones connected to
+For phone testing, set `EXPO_PUBLIC_API_URL` to the server's LAN API URL (not
+`localhost`), run `yarn start:lan`, and open the app in Expo Go on phones connected to
 the same Wi-Fi. When the pilot passes, build an installable Android APK with
 `npx eas-cli build --profile preview --platform android`; `preview` is for internal
 faculty distribution, while `production` produces a Play Store AAB.
@@ -202,7 +202,7 @@ ConKiosk/
 │   │       ├── api.ts         ← HTTP client with auth headers
 │   │       └── storage/       ← Wrapper around SecureStore + AsyncStorage
 │   │
-│   ├── .env                   ← EXPO_PUBLIC_BACKEND_URL (do NOT commit)
+│   ├── .env                   ← EXPO_PUBLIC_API_URL (do NOT commit)
 │   └── package.json
 │
 ├── RPI5_DEPLOYMENT.md         ← Complete RPi 5 deployment guide
