@@ -94,7 +94,7 @@ export default function AdminScreen() {
       <Stat label="Active queue" value={summary?.active_queue_entries ?? 0} icon="list-outline" color="#059669" />
       <Stat label="Today" value={summary?.today_consultations ?? 0} icon="calendar-outline" color="#0891B2" onPress={() => openRecords('today')} />
     </View>
-    <View style={styles.notice}><Ionicons name="shield-checkmark-outline" size={20} color="#1D4ED8" /><Text style={styles.noticeText}>{isAdmin ? 'This account has system-wide access. Change its credentials before an IT Chair turnover, then securely hand over the new login.' : 'Read-only access: faculty information, consultation records, and student records.'}</Text></View>
+    <View style={styles.notice}><Ionicons name="shield-checkmark-outline" size={20} color="#1D4ED8" /><Text style={styles.noticeText}>{isAdmin ? 'This account has system-wide access. Keep its credentials restricted to authorized administrators and change the password whenever administrator responsibility is transferred.' : 'Read-only access: faculty information, consultation records, and student records.'}</Text></View>
     {isAdmin && <TouchableOpacity style={styles.credentials} onPress={() => router.push('/admin-account')}><Ionicons name="key-outline" size={18} color="#FFFFFF" /><Text style={styles.credentialsText}>Manage administrator credentials</Text></TouchableOpacity>}
     {!isAdmin && <TouchableOpacity style={styles.credentials} onPress={() => router.replace('/(tabs)/dashboard')}><Ionicons name="home-outline" size={18} color="#FFFFFF" /><Text style={styles.credentialsText}>Return to Faculty Dashboard</Text></TouchableOpacity>}
     <Text style={styles.sectionTitle}>Faculty management</Text>
