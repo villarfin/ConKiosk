@@ -15,11 +15,13 @@ A complete 4-component consultation management system for universities, built as
 2. [System Components](#system-components)
 3. [Tech Stack](#tech-stack)
 4. [Quick Start (Development)](#quick-start-development)
-5. [Test Credentials](#test-credentials)
-6. [What Each File Does](#what-each-file-does)
-7. [Customization Guide](#customization-guide) ← **edit faculty, students, colors, cards, images**
-8. [Raspberry Pi 5 Deployment](#raspberry-pi-5-deployment)
-9. [Troubleshooting](#troubleshooting)
+5. [Roles, Registration, and Privacy](#roles-registration-and-privacy)
+6. [Offline LAN Access](#offline-lan-access)
+7. [Test Credentials](#test-credentials)
+8. [What Each File Does](#what-each-file-does)
+9. [Customization Guide](#customization-guide) ← **edit faculty, students, colors, cards, images**
+10. [Raspberry Pi 5 Deployment](#raspberry-pi-5-deployment)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -44,6 +46,41 @@ ConKiosk digitizes faculty consultations. Instead of manual queues and uncertain
 | 4 | **Raspberry Pi 5 Server** | FastAPI backend + PostgreSQL + WebSockets | The RPi itself |
 
 All four components live in **one codebase** in this repo.
+
+## Roles, Registration, and Privacy
+
+| Role | Access |
+|---|---|
+| **Faculty** | Manages availability, consultation requests, consultation notes/feedback, profile, and history. |
+| **IT Chair** | Read-only faculty, student, and consultation records. Consultation detail includes student information and the faculty-authored Notes/feedback. |
+| **Administrator** | Manages registrations, faculty profiles and availability, administrator credentials, IT Chair assignment, and faculty accounts. |
+
+New faculty accounts are created in a pending state and cannot sign in until an
+Administrator approves them. Registration requires password confirmation and a Privacy
+Notice acknowledgment. Before production use, the school must have its Data Protection
+Officer review the notice and replace its official institution, retention, and DPO-contact details.
+
+Administrative safeguards: approving/rejecting registrations and IT Chair transfers
+require confirmation; faculty deletion additionally requires the current administrator
+password, verified by the API. Deleting an account immediately revokes that faculty
+member's active app session.
+
+## Offline LAN Access
+
+Normal operation does not require internet access. Connect the Raspberry Pi, faculty
+phones, kiosk, and TV to the same dedicated router. For a Pi at `192.168.0.2`:
+
+| Interface | LAN address |
+|---|---|
+| Faculty web app | `http://192.168.0.2/login` |
+| Student kiosk | `http://192.168.0.2/kiosk` |
+| TV queue display | `http://192.168.0.2/tv` |
+| Health check | `http://192.168.0.2/api/health` |
+
+For Expo Go development, use `EXPO_PUBLIC_API_URL=http://192.168.0.2/api` (replace
+the IP with the Pi's actual LAN address). `yarn start:lan` prefers Ethernet when both
+Ethernet and Wi-Fi are connected and uses the Nginx API endpoint by default. See
+[LAN_OFFLINE_DEPLOYMENT.md](LAN_OFFLINE_DEPLOYMENT.md) for full deployment and testing.
 
 ---
 
@@ -178,6 +215,9 @@ ConKiosk/
 │   │   ├── _layout.tsx        ← Root layout, wraps app in AuthProvider
 │   │   ├── index.tsx          ← Landing page, redirects to /login or /dashboard
 │   │   ├── login.tsx          ← Faculty login screen
+│   │   ├── signup.tsx         ← Faculty registration + privacy acknowledgment
+│   │   ├── admin.tsx          ← Administrator controls and protected actions
+│   │   ├── admin-account.tsx  ← Administrator profile/password management
 │   │   ├── tv.tsx             ← TV queue display  (compact cards)
 │   │   │
 │   │   ├── (tabs)/            ← FACULTY MOBILE APP (5 bottom tabs)
@@ -187,6 +227,7 @@ ConKiosk/
 │   │   │   ├── history.tsx    ← Consultation history with search/filter
 │   │   │   ├── notifications.tsx
 │   │   │   └── profile.tsx    ← Profile edit, change password, logout
+│   │   │   └── it-chair.tsx   ← Read-only institutional consultation records
 │   │   │
 │   │   └── kiosk/             ← STUDENT KIOSK (touchscreen)
 │   │       ├── _layout.tsx    ← Stack navigator for kiosk flow
@@ -416,7 +457,7 @@ See **`RPI5_DEPLOYMENT.md`** for the full step-by-step guide, including:
 4. On your dev machine: `cd frontend && npx expo export -p web` — creates a `dist/` folder.
 5. Copy `dist/` to the RPi, serve via nginx.
 6. Point Chromium (kiosk mode) at `http://localhost/kiosk` and `http://localhost/tv`.
-7. Update mobile app's `.env` to use RPi's local IP: `EXPO_PUBLIC_BACKEND_URL=http://192.168.x.x:8001`
+7. Update the mobile app's `.env` to use the Nginx LAN API: `EXPO_PUBLIC_API_URL=http://192.168.x.x/api`
 8. Build the APK (see Expo docs or use EAS Build).
 
 ---
@@ -426,6 +467,7 @@ See **`RPI5_DEPLOYMENT.md`** for the full step-by-step guide, including:
 | Problem | Solution |
 |---------|----------|
 | Faculty app can't reach backend | Check that phone + RPi are on the same WiFi. Verify RPi's IP with `hostname -I`. Check `frontend/.env`. |
+| Faculty cannot sign in after registering | An Administrator must approve the pending registration first. |
 | Kiosk / TV shows blank page | Ensure Expo dev server is running, or that `nginx` is serving the `dist/` folder. |
 | Real-time updates do not arrive | Check nginx `proxy_pass` for `/ws` and the backend service logs. |
 | PostgreSQL won't start | `sudo journalctl -u postgresql` — often out of disk space or a configuration issue. |
@@ -440,6 +482,7 @@ See **`RPI5_DEPLOYMENT.md`** for the full step-by-step guide, including:
 - [ ] Copy `backend/.env.example` to `backend/.env`; set `ENVIRONMENT=production`, a long unique `JWT_SECRET_KEY`, restricted `CORS_ORIGINS`, and `ALLOW_SEED_DATA=false`.
 - [ ] Use a dedicated PostgreSQL account with a strong password and least-privilege access.
 - [ ] Import faculty and student records through an approved administrative process. Do not call `/api/seed` after real data exists.
+- [ ] Have the school's Data Protection Officer review the registration Privacy Notice and add the official institution name, DPO contact details, and retention schedule.
 - [ ] Keep the kiosk and TV on the school network; use a firewall to expose only the required local ports. Enable HTTPS if any access leaves that network.
 - [ ] Back up PostgreSQL regularly and test restoring a backup: `pg_dump -U conkiosk conkiosk > conkiosk.sql`.
 - [ ] Test the full workflow with non-production accounts: scan → submit → queue ticket → faculty start → TV “Now Serving” → complete.
@@ -460,6 +503,7 @@ Base URL: `http://<backend-url>/api`
 
 ### Authenticated (Faculty App)
 - `POST /auth/login`
+- `POST /auth/signup` — creates a pending faculty registration
 - `POST /auth/change-password`
 - `GET/PATCH /faculty/profile`
 - `PATCH /faculty/availability`
@@ -470,6 +514,15 @@ Base URL: `http://<backend-url>/api`
 - `POST /consultations/{id}/start` — auto-sets faculty to busy
 - `POST /consultations/{id}/complete` — auto-sets back to available, advances queue
 - `GET/PATCH /notifications`, `POST /notifications/mark-all-read`
+
+### Administrator / IT Chair records
+- `GET /admin/summary`, `GET /admin/faculty`, `GET /admin/students`
+- `GET /admin/faculty/{school_id}/consultations` — read-only consultation records,
+  including faculty Notes/feedback for authorized Administrator and IT Chair users
+- `POST /admin/faculty/{school_id}/approve` and `POST /admin/faculty/{school_id}/reject`
+- `POST /admin/it-chair/{school_id}`, `DELETE /admin/it-chair`
+- `DELETE /admin/faculty/{school_id}` — requires an authenticated Administrator and
+  JSON body `{ "admin_password": "current-password" }`
 
 ---
 
