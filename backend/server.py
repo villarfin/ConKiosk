@@ -272,8 +272,10 @@ async def ws_endpoint(websocket: WebSocket, faculty_id: Optional[str] = None, to
 
 @api.post("/auth/login")
 async def login(payload: LoginRequest, db: AsyncSession = Depends(session)):
-    faculty = await db.scalar(select(Faculty).where(Faculty.school_id == payload.school_id))
-    if not faculty or not pwd_context.verify(payload.password, faculty.password_hash): raise HTTPException(401, "Incorrect school ID or password")
+    school_id = payload.school_id.strip().upper()
+    faculty = await db.scalar(select(Faculty).where(Faculty.school_id == school_id))
+    if not faculty: raise HTTPException(404, "No account was found for this School ID")
+    if not pwd_context.verify(payload.password, faculty.password_hash): raise HTTPException(401, "Incorrect password")
     if not faculty.is_approved: raise HTTPException(403, "Your faculty registration is awaiting Administrator approval")
     token = jwt.encode({"sub": faculty.school_id, "exp": datetime.utcnow() + timedelta(days=30)}, SECRET_KEY, algorithm="HS256")
     return {"access_token": token, "token_type": "bearer", "faculty": serialize(faculty, True)}

@@ -21,21 +21,25 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loginError, setLoginError] = useState('');
   const { login } = useAuth();
   const router = useRouter();
 
   const handleLogin = async () => {
     if (!schoolId || !password) {
-      Alert.alert('Error', 'Please enter your School ID and password');
+      setLoginError('Enter both your School ID and password.');
       return;
     }
 
+    setLoginError('');
     setLoading(true);
     try {
       const role = await login(schoolId, password);
       router.replace(role === 'admin' ? '/admin' : '/(tabs)/dashboard');
     } catch (error: any) {
-      Alert.alert('Login Failed', error.message || 'Invalid credentials');
+      const message = error.message || 'Unable to sign in. Please try again.';
+      setLoginError(message);
+      Alert.alert('Login Failed', message);
     } finally {
       setLoading(false);
     }
@@ -76,7 +80,7 @@ export default function LoginScreen() {
                   style={styles.input}
                   placeholder="Enter your School ID"
                   value={schoolId}
-                  onChangeText={setSchoolId}
+                  onChangeText={value => { setSchoolId(value); setLoginError(''); }}
                   autoCapitalize="characters"
                   autoCorrect={false}
                   editable={!loading}
@@ -94,7 +98,7 @@ export default function LoginScreen() {
                   style={styles.input}
                   placeholder="Enter your password"
                   value={password}
-                  onChangeText={setPassword}
+                  onChangeText={value => { setPassword(value); setLoginError(''); }}
                   secureTextEntry={!showPassword}
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -126,6 +130,8 @@ export default function LoginScreen() {
                 <Text style={styles.loginButtonText}>Sign In</Text>
               )}
             </TouchableOpacity>
+
+            {loginError ? <View accessibilityLiveRegion="assertive" style={styles.loginError}><Ionicons name="alert-circle-outline" size={18} color="#B91C1C" /><Text style={styles.loginErrorText}>{loginError}</Text></View> : null}
 
             <TouchableOpacity style={styles.signupLink} onPress={() => router.push('/signup')}>
               <Text style={styles.signupLinkText}>New faculty? Create an account</Text>
@@ -216,6 +222,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1A1A1A',
   },
+  loginError: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FEE2E2', borderRadius: 10, padding: 12, marginTop: 14 },
+  loginErrorText: { flex: 1, color: '#991B1B', fontSize: 13, fontWeight: '600', lineHeight: 18 },
   eyeIcon: {
     padding: 8,
   },

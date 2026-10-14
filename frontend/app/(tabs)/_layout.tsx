@@ -1,10 +1,14 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 export default function TabsLayout() {
   const { faculty } = useAuth();
+  const insets = useSafeAreaInsets();
+  // Leave enough space for Android gesture/navigation areas as well as labels.
+  const bottomPadding = Math.max(insets.bottom, 10);
   return (
     <Tabs
       screenOptions={{
@@ -15,14 +19,16 @@ export default function TabsLayout() {
           backgroundColor: '#FFFFFF',
           borderTopWidth: 1,
           borderTopColor: '#E0E0E0',
-          height: Platform.OS === 'ios' ? 88 : 64,
-          paddingBottom: Platform.OS === 'ios' ? 24 : 8,
-          paddingTop: 8,
+          height: 58 + bottomPadding,
+          paddingBottom: bottomPadding,
+          paddingTop: 7,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: 11,
+          lineHeight: 14,
           fontWeight: '500',
         },
+        tabBarItemStyle: { paddingVertical: 1 },
       }}
     >
       <Tabs.Screen
