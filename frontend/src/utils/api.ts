@@ -56,15 +56,17 @@ export class ApiClient {
     return response.json();
   }
 
-  static async delete(endpoint: string) {
+  static async delete(endpoint: string, data?: any) {
     const headers = await this.getHeaders();
     const response = await fetch(apiUrl(endpoint), {
       method: 'DELETE',
       headers,
+      body: data ? JSON.stringify(data) : undefined,
     });
 
     if (!response.ok) {
-      throw new Error(`API Error: ${response.statusText}`);
+      const error = await response.json().catch(() => null);
+      throw new Error(error?.detail || `API Error: ${response.statusText}`);
     }
 
     return response.json();

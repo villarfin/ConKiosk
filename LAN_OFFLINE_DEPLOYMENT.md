@@ -78,7 +78,9 @@ corepack yarn start:lan
 ```
 
 The LAN launcher detects the current Wi-Fi IP and temporarily sets
-`EXPO_PUBLIC_API_URL=http://CURRENT_PI_IP:8001/api`; it is development-only.
+`EXPO_PUBLIC_API_URL=http://CURRENT_PI_IP/api`, which uses the local Nginx
+proxy. It is development-only. Set `CONKIOSK_API_PORT=8001` only when using a
+separate, deliberately LAN-bound development API server.
 Expo Go itself must already be installed on phones. First-time Expo Go installation, JavaScript package installation, and cloud builds may require internet, but a running LAN Metro server and the ConKiosk API do not use internet.
 
 ## 4. Nginx deployment for kiosk and TV

@@ -156,6 +156,8 @@ class ConsultationAction(BaseModel):
 class ConsultationUpdate(BaseModel):
     notes: Optional[str] = None; remarks: Optional[str] = None; status: Optional[str] = None; duration: Optional[int] = None
 class ChangePasswordRequest(BaseModel): current_password: str; new_password: str
+class AdminPasswordConfirmation(BaseModel):
+    admin_password: str = Field(min_length=1, max_length=512)
 class Student(BaseModel): student_id: str; full_name: str; program: str = ""; year_level: str; section: str
 class KioskConsultationRequest(BaseModel): faculty_school_id: str; topic: str; consultation_type: str = "individual"; students: list[Student]
 class AdminFacultyUpdate(BaseModel):
@@ -380,6 +382,15 @@ async def approve_faculty(school_id: str, db: AsyncSession = Depends(session), _
     faculty.is_approved = True; await db.commit(); await db.refresh(faculty)
     return {"message": f"{faculty.full_name} is approved", "faculty": serialize(faculty, True)}
 
+@api.post("/admin/faculty/{school_id}/reject")
+async def reject_faculty(school_id: str, db: AsyncSession = Depends(session), _: Faculty = Depends(current_admin)):
+    """Reject a pending sign-up. Approved accounts must use the deletion workflow."""
+    faculty = await db.scalar(select(Faculty).where(and_(Faculty.school_id == school_id, Faculty.role == "faculty")))
+    if not faculty: raise HTTPException(404, "Faculty registration not found")
+    if faculty.is_approved: raise HTTPException(409, "Approved faculty accounts cannot be rejected")
+    await db.delete(faculty); await db.commit()
+    return {"message": "Faculty registration rejected"}
+
 @api.post("/admin/it-chair/{school_id}")
 async def assign_it_chair(school_id: str, db: AsyncSession = Depends(session), _: Faculty = Depends(current_admin)):
     nominee = await db.scalar(select(Faculty).where(and_(Faculty.school_id == school_id, Faculty.role.in_(["faculty", "it_chair"]))))
@@ -398,7 +409,10 @@ async def remove_it_chair(db: AsyncSession = Depends(session), _: Faculty = Depe
     return {"message": f"{chair.full_name} returned to normal faculty access"}
 
 @api.delete("/admin/faculty/{school_id}")
-async def delete_faculty_account(school_id: str, db: AsyncSession = Depends(session), _: Faculty = Depends(current_admin)):
+async def delete_faculty_account(school_id: str, payload: AdminPasswordConfirmation, db: AsyncSession = Depends(session), admin: Faculty = Depends(current_admin)):
+    # A valid admin JWT alone is not enough for irreversible account deletion.
+    if not pwd_context.verify(payload.admin_password, admin.password_hash):
+        raise HTTPException(403, "Administrator password is incorrect")
     faculty = await db.scalar(select(Faculty).where(and_(Faculty.school_id == school_id, Faculty.role.in_(["faculty", "it_chair"]))))
     if not faculty: raise HTTPException(404, "Faculty account not found")
     # Keep completed consultation history for institutional reporting, but remove live account/queue data.

@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { LogBox } from "react-native";
+import { LogBox, StyleSheet, View } from "react-native";
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/contexts/AuthContext";
@@ -33,8 +33,12 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <Stack screenOptions={{ headerShown: false }} />
-      <ServerConnectionStatus />
+      <View style={styles.root}>
+        <ServerConnectionStatus />
+        <View style={styles.navigator}><Stack screenOptions={{ headerShown: false }} /></View>
+      </View>
     </AuthProvider>
   );
 }
+
+const styles = StyleSheet.create({ root: { flex: 1 }, navigator: { flex: 1 } });

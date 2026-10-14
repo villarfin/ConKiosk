@@ -4,7 +4,10 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const preferredInterfaces = [/^wlan/i, /^wl/i, /^eth/i, /^en/i];
+// The deployed Pi reaches the dedicated router through Ethernet. Prefer that
+// interface when an old Wi-Fi connection is also active, so Expo advertises the
+// same LAN address that faculty phones can reach.
+const preferredInterfaces = [/^eth/i, /^en/i, /^wlan/i, /^wl/i];
 const privateIpv4 = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
 
 function addresses() {
@@ -18,7 +21,11 @@ function addresses() {
 const available = addresses();
 const selected = available.find(({ name }) => preferredInterfaces.some((pattern) => pattern.test(name))) || available[0];
 
-const apiUrl = selected ? `http://${selected.address}:8001/api` : process.env.EXPO_PUBLIC_API_URL;
+// Production exposes the API through Nginx on port 80, while Uvicorn remains
+// loopback-only. Set CONKIOSK_API_PORT=8001 only for a separate direct-API
+// development server that is intentionally bound to the LAN.
+const apiPort = process.env.CONKIOSK_API_PORT?.trim();
+const apiUrl = selected ? `http://${selected.address}${apiPort ? `:${apiPort}` : ''}/api` : process.env.EXPO_PUBLIC_API_URL;
 if (selected) {
   console.log(`Using ${selected.name} (${apiUrl}) for the ConKiosk development API.`);
 } else {

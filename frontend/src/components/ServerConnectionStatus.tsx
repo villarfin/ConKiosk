@@ -29,7 +29,7 @@ export function ServerConnectionStatus() {
 
   if (connected === null) return null;
   return (
-    <View pointerEvents="none" style={[styles.badge, connected ? styles.connected : styles.unreachable]}>
+    <View pointerEvents="none" accessibilityLiveRegion="polite" style={[styles.badge, connected ? styles.connected : styles.unreachable]}>
       <View style={styles.dot} />
       <Text style={styles.text}>ConKiosk Server {connected ? 'Connected' : 'Unreachable'}</Text>
     </View>
@@ -37,7 +37,7 @@ export function ServerConnectionStatus() {
 }
 
 const styles = StyleSheet.create({
-  badge: { position: 'absolute', zIndex: 100, top: 48, right: 14, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14 },
+  badge: { alignSelf: 'stretch', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, minHeight: 34, paddingHorizontal: 12, paddingVertical: 7 },
   connected: { backgroundColor: '#166534' },
   unreachable: { backgroundColor: '#B91C1C' },
   dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#FFFFFF' },
