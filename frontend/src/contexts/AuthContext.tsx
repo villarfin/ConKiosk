@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { storage } from '@/src/utils/storage';
 import { RealtimeClient } from '@/src/utils/realtime';
 import { apiUrl } from '@/src/config/api';
+import { router } from 'expo-router';
 
 interface Faculty {
   _id: string;
@@ -52,6 +53,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       };
     }
   }, [isAuthenticated, faculty?.school_id, token]);
+
+  // An administrator can delete a faculty account while its app is open.
+  // The server notifies that specific WebSocket, so revoke local access at once.
+  useEffect(() => {
+    if (!realtime) return;
+    return realtime.subscribe((event) => {
+      if (event.type === 'account_deleted') {
+        void logout().finally(() => router.replace('/login'));
+      }
+    });
+  }, [realtime]);
+
+  // If the real-time connection is temporarily unavailable, do not leave a
+  // deleted account usable from locally cached credentials.
+  useEffect(() => {
+    if (!isAuthenticated || !token) return;
+    const validateSession = async () => {
+      try {
+        const response = await fetch(apiUrl('/faculty/profile'), { headers: { Authorization: `Bearer ${token}` } });
+        if (response.status === 401) await logout();
+      } catch { /* Keep the local session during a short LAN interruption. */ }
+    };
+    const timer = setInterval(validateSession, 30_000);
+    return () => clearInterval(timer);
+  }, [isAuthenticated, token]);
 
   const initializeAuth = async () => {
     try {

@@ -423,6 +423,8 @@ async def delete_faculty_account(school_id: str, payload: AdminPasswordConfirmat
     await db.execute(delete(QueueRecord).where(QueueRecord.faculty_school_id == school_id))
     await db.execute(delete(QueueCounter).where(QueueCounter.faculty_school_id == school_id))
     await db.delete(faculty); await db.commit()
+    # Tell an active faculty app to clear its locally cached JWT immediately.
+    await connections.send("account_deleted", {"message": "Your faculty account has been removed by an administrator."}, faculty_id=school_id)
     await connections.send("availability_changed", {"faculty_id": school_id, "status": "unavailable", "accepting_consultations": False})
     return {"message": "Faculty account deleted; completed consultation records were retained"}
 
