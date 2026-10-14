@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -24,6 +24,7 @@ export default function LoginScreen() {
   const [loginError, setLoginError] = useState('');
   const { login } = useAuth();
   const router = useRouter();
+  const { registration } = useLocalSearchParams<{ registration?: string }>();
 
   const handleLogin = async () => {
     if (!schoolId || !password) {
@@ -66,6 +67,7 @@ export default function LoginScreen() {
 
           {/* Login Form */}
           <View style={styles.form}>
+            {registration === 'submitted' ? <View accessibilityLiveRegion="polite" style={styles.registrationNotice}><Ionicons name="checkmark-circle-outline" size={19} color="#15803D" /><Text style={styles.registrationNoticeText}>Registration submitted. Your account is awaiting Administrator approval before you can sign in.</Text></View> : null}
             <Text style={styles.welcomeText}>Welcome Back!</Text>
             <Text style={styles.instructionText}>
               Sign in to manage your consultations
@@ -224,6 +226,8 @@ const styles = StyleSheet.create({
   },
   loginError: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FEE2E2', borderRadius: 10, padding: 12, marginTop: 14 },
   loginErrorText: { flex: 1, color: '#991B1B', fontSize: 13, fontWeight: '600', lineHeight: 18 },
+  registrationNotice: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#DCFCE7', borderRadius: 10, padding: 12, marginBottom: 16 },
+  registrationNoticeText: { flex: 1, color: '#166534', fontSize: 13, fontWeight: '600', lineHeight: 18 },
   eyeIcon: {
     padding: 8,
   },

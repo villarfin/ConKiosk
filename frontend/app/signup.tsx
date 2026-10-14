@@ -26,7 +26,7 @@ export default function SignupScreen() {
       const response = await fetch(apiUrl('/auth/signup'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.detail || 'Could not create the account.');
-      Alert.alert('Registration submitted', 'Your account is awaiting Administrator approval. You can sign in after it has been approved.', [{ text: 'Back to sign in', onPress: () => router.replace('/login') }]);
+      router.replace('/login?registration=submitted');
     } catch (error: any) {
       Alert.alert('Registration failed', error.message || 'Please try again.');
     } finally { setLoading(false); }
