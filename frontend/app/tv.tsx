@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Dimensions, Image, TouchableOpacity } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Image, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { RealtimeClient } from '@/src/utils/realtime';
@@ -8,7 +8,7 @@ import { apiUrl } from '@/src/config/api';
 let announcementAudioContext: AudioContext | null = null;
 
 const enableAnnouncementSound = async () => {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined') return false;
   const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
   if (!AudioContextClass) return false;
   announcementAudioContext ??= new AudioContextClass();
@@ -32,46 +32,33 @@ const playAnnouncementTone = () => {
   return true;
 };
 
-interface NowServing {
-  queue_number: string;
-  student_names: string[];
-  topic: string;
-}
-
+interface NowServing { queue_number: string; student_names: string[]; topic: string; }
 interface FacultyStatus {
-  school_id: string;
-  full_name: string;
-  department: string;
-  office_location: string;
-  availability_status: string;
-  profile_image?: string;
-  now_serving: NowServing | null;
-  waiting_count: number;
-  next_queue_numbers: string[];
+  school_id: string; full_name: string; department: string; office_location: string;
+  availability_status: string; profile_image?: string; now_serving: NowServing | null;
+  waiting_count: number; next_queue_numbers: string[];
 }
 interface RescheduleAnnouncement { student_name: string; date: string; time: string; }
+
+const statusColor = (status: string) => ({ available: '#22C55E', busy: '#F59E0B', unavailable: '#EF4444' }[status] || '#94A3B8');
+const statusLabel = (status: string) => ({ available: 'AVAILABLE', busy: 'BUSY', unavailable: 'UNAVAILABLE' }[status] || 'UNKNOWN');
+const initials = (name: string) => name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase();
 
 export default function TVDisplay() {
   const [data, setData] = useState<FacultyStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(new Date());
-  const [rescheduleAnnouncement, setRescheduleAnnouncement] = useState<RescheduleAnnouncement | null>(null);
   const [soundReady, setSoundReady] = useState(false);
-
-  const activateSound = async () => {
-    const enabled = await enableAnnouncementSound();
-    setSoundReady(Boolean(enabled));
-    if (enabled) playAnnouncementTone();
-  };
+  const [rescheduleAnnouncement, setRescheduleAnnouncement] = useState<RescheduleAnnouncement | null>(null);
+  const { width, height } = useWindowDimensions();
 
   const loadData = useCallback(async () => {
     try {
       const response = await fetch(apiUrl('/tv-display/status'), { cache: 'no-store' });
       if (!response.ok) throw new Error(`TV status request failed: ${response.status}`);
-      const result = await response.json();
-      setData(result);
-    } catch (e) {
-      console.error('Error loading TV display data:', e);
+      setData(await response.json());
+    } catch (error) {
+      console.error('Error loading TV display data:', error);
     } finally {
       setLoading(false);
     }
@@ -79,8 +66,6 @@ export default function TVDisplay() {
 
   useEffect(() => {
     loadData();
-    // WebSocket events update immediately; recover within one second if a display
-    // browser misses an event while reconnecting to Wi-Fi.
     const poll = setInterval(loadData, 1000);
     return () => clearInterval(poll);
   }, [loadData]);
@@ -88,20 +73,20 @@ export default function TVDisplay() {
   useEffect(() => {
     const realtime = new RealtimeClient();
     realtime.connect();
-    const unsubscribe = realtime.subscribe(({ type, data }) => {
-      if (['availability_changed', 'queue_updated', 'consultation_started',
-        'consultation_completed', 'new_consultation_request'].includes(type)) loadData();
-      if (type === 'consultation_rescheduled' && data?.student_name && data?.date && data?.time) {
-        setRescheduleAnnouncement({ student_name: String(data.student_name), date: String(data.date), time: String(data.time) });
+    const unsubscribe = realtime.subscribe(({ type, data: eventData }) => {
+      if (['availability_changed', 'queue_updated', 'consultation_started', 'consultation_completed', 'new_consultation_request'].includes(type)) loadData();
+      if (type === 'consultation_rescheduled' && eventData?.student_name && eventData?.date && eventData?.time) {
+        setRescheduleAnnouncement({ student_name: String(eventData.student_name), date: String(eventData.date), time: String(eventData.time) });
       }
     });
     return () => { unsubscribe(); realtime.disconnect(); };
   }, [loadData]);
 
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
   }, []);
+
   useEffect(() => {
     if (!rescheduleAnnouncement) return;
     playAnnouncementTone();
@@ -109,284 +94,68 @@ export default function TVDisplay() {
     return () => clearTimeout(timer);
   }, [rescheduleAnnouncement]);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'available': return '#4CAF50';
-      case 'busy': return '#FF9800';
-      case 'unavailable': return '#F44336';
-      default: return '#9E9E9E';
-    }
-  };
+  if (loading) return <View style={styles.loading}><ActivityIndicator size="large" color="#38BDF8" /></View>;
 
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'available': return 'AVAILABLE';
-      case 'busy': return 'BUSY';
-      case 'unavailable': return 'UNAVAILABLE';
-      default: return 'UNKNOWN';
-    }
-  };
-
-  const getInitials = (name: string) =>
-    name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2196F3" />
-      </View>
-    );
-  }
-
-  const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-  const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-
-  // Summary stats
-  const availableCount = data.filter(f => f.availability_status === 'available').length;
-  const busyCount = data.filter(f => f.availability_status === 'busy').length;
-  const unavailableCount = data.filter(f => f.availability_status === 'unavailable').length;
+  const compact = width < 900 || height < 650;
+  const columns = width >= 1600 ? 4 : width >= 1050 ? 3 : width >= 650 ? 2 : 1;
+  const rows = Math.max(1, Math.ceil(Math.max(data.length, 1) / columns));
+  const pagePadding = compact ? 10 : 18;
+  const gap = compact ? 8 : 14;
+  const cardWidth = Math.max(1, (width - (pagePadding * 2) - (gap * (columns - 1))) / columns);
+  const cardHeight = Math.max(compact ? 105 : 130, (height - (compact ? 128 : 158) - (gap * (rows - 1))) / rows);
+  const availableCount = data.filter((faculty) => faculty.availability_status === 'available').length;
+  const busyCount = data.filter((faculty) => faculty.availability_status === 'busy').length;
+  const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  const date = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
   return (
     <SafeAreaView style={styles.container}>
-      {rescheduleAnnouncement && <View style={styles.announcementOverlay}><View style={styles.announcementCard}><Ionicons name="calendar" size={56} color="#2196F3" /><Text style={styles.announcementTitle}>CONSULTATION RESCHEDULED</Text><Text style={styles.announcementStudent}>{rescheduleAnnouncement.student_name}</Text><Text style={styles.announcementDate}>{rescheduleAnnouncement.date}</Text><Text style={styles.announcementTime}>{rescheduleAnnouncement.time}</Text><Text style={styles.announcementHint}>Returning to the queue display shortly</Text></View></View>}
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.brand}>ConKiosk</Text>
-          <Text style={styles.brandSubtitle}>Faculty Consultation Queue</Text>
-        </View>
+      {rescheduleAnnouncement && <View style={styles.announcementOverlay}><View style={styles.announcementCard}><Ionicons name="calendar" size={compact ? 38 : 56} color="#0284C7" /><Text style={styles.announcementTitle}>CONSULTATION RESCHEDULED</Text><Text style={styles.announcementStudent}>{rescheduleAnnouncement.student_name}</Text><Text style={styles.announcementDate}>{rescheduleAnnouncement.date} · {rescheduleAnnouncement.time}</Text><Text style={styles.announcementHint}>Returning to the queue display shortly</Text></View></View>}
 
-        <View style={styles.summaryRow}>
-          <View style={[styles.summaryChip, { borderColor: '#4CAF50' }]}>
-            <View style={[styles.summaryDot, { backgroundColor: '#4CAF50' }]} />
-            <Text style={styles.summaryChipText}>{availableCount} Available</Text>
-          </View>
-          <View style={[styles.summaryChip, { borderColor: '#FF9800' }]}>
-            <View style={[styles.summaryDot, { backgroundColor: '#FF9800' }]} />
-            <Text style={styles.summaryChipText}>{busyCount} Busy</Text>
-          </View>
-          <View style={[styles.summaryChip, { borderColor: '#F44336' }]}>
-            <View style={[styles.summaryDot, { backgroundColor: '#F44336' }]} />
-            <Text style={styles.summaryChipText}>{unavailableCount} Off</Text>
-          </View>
-        </View>
-
-        <View style={styles.headerRight}>
-          <TouchableOpacity onPress={activateSound} style={[styles.soundButton, soundReady && styles.soundButtonEnabled]}>
-            <Ionicons name={soundReady ? 'volume-high' : 'volume-mute'} size={16} color="#FFFFFF" />
-            <Text style={styles.soundButtonText}>{soundReady ? 'Sound on' : 'Enable sound'}</Text>
-          </TouchableOpacity>
-          <Text style={styles.time}>{timeStr}</Text>
-          <Text style={styles.date}>{dateStr}</Text>
-        </View>
+      <View style={[styles.header, compact && styles.headerCompact]}>
+        <View><Text style={[styles.brand, compact && styles.brandCompact]}>ConKiosk</Text><Text style={styles.brandSubtitle}>Faculty Consultation Queue</Text></View>
+        <View style={styles.summaryRow}><Text style={styles.summaryAvailable}>{availableCount} available</Text><Text style={styles.summaryBusy}>{busyCount} busy</Text></View>
+        <View style={styles.clock}><TouchableOpacity accessibilityLabel="Enable queue announcement sound" onPress={async () => { const enabled = await enableAnnouncementSound(); setSoundReady(enabled); if (enabled) playAnnouncementTone(); }} style={[styles.soundButton, soundReady && styles.soundButtonOn]}><Ionicons name={soundReady ? 'volume-high' : 'volume-mute'} size={14} color="#FFFFFF" /><Text style={styles.soundText}>{soundReady ? 'Sound on' : 'Sound'}</Text></TouchableOpacity><Text style={[styles.time, compact && styles.timeCompact]}>{time}</Text><Text style={styles.date}>{date}</Text></View>
       </View>
 
-      {/* Compact Faculty Grid */}
-      <ScrollView contentContainerStyle={styles.grid}>
-        {data.map((f) => (
-          <View key={f.school_id} testID={`tv-faculty-${f.school_id}`} style={styles.card}>
-            {/* Left: Avatar with status ring */}
-            <View style={styles.avatarWrap}>
-                <View style={[styles.avatarRing, { borderColor: getStatusColor(f.availability_status) }]}>
-                  <View style={styles.avatar}>
-                    {f.profile_image ? (
-                      <Image source={{ uri: f.profile_image }} style={styles.avatarImage} />
-                    ) : (
-                      <Text style={styles.avatarText}>{getInitials(f.full_name)}</Text>
-                    )}
-                  </View>
-              </View>
-              <View style={[styles.statusDot, { backgroundColor: getStatusColor(f.availability_status) }]} />
+      <View style={[styles.grid, { padding: pagePadding, gap }]}>
+        {data.map((faculty) => {
+          const color = statusColor(faculty.availability_status);
+          const nextNumbers = faculty.next_queue_numbers.slice(0, 4);
+          return <View key={faculty.school_id} testID={`tv-faculty-${faculty.school_id}`} style={[styles.card, { width: cardWidth, height: cardHeight, borderLeftColor: color }]}>
+            <View style={styles.cardTop}>
+              <View style={[styles.avatar, { borderColor: color }]}>{faculty.profile_image ? <Image source={{ uri: faculty.profile_image }} style={styles.avatarImage} /> : <Text style={styles.avatarText}>{initials(faculty.full_name)}</Text>}</View>
+              <View style={styles.nameBlock}><Text style={[styles.facultyName, compact && styles.facultyNameCompact]} numberOfLines={1}>{faculty.full_name}</Text><Text style={[styles.status, { color }]}>{statusLabel(faculty.availability_status)}</Text></View>
+              <Text style={styles.office} numberOfLines={1}>{faculty.office_location}</Text>
             </View>
 
-            {/* Right: Info */}
-            <View style={styles.cardBody}>
-              <Text style={styles.facultyName} numberOfLines={1}>{f.full_name}</Text>
-
-              <View style={styles.statusRow}>
-                <View style={[styles.statusPill, { backgroundColor: getStatusColor(f.availability_status) }]}>
-                  <Text style={styles.statusPillText}>{getStatusLabel(f.availability_status)}</Text>
-                </View>
-              </View>
-
-              {/* Queue info */}
-              {f.now_serving ? (
-                <View style={styles.queueRow}>
-                  <Text style={styles.queueLabel}>NOW SERVING</Text>
-                  <Text style={styles.queueNumber}>{f.now_serving.queue_number}</Text>
-                  {f.waiting_count > 0 && (
-                    <Text style={styles.queueWaiting}>+{f.waiting_count} waiting</Text>
-                  )}
-                </View>
-              ) : f.waiting_count > 0 ? (
-                <View style={styles.queueRow}>
-                  <Text style={styles.queueLabel}>NEXT UP</Text>
-                  <Text style={styles.queueNumberNext}>{f.next_queue_numbers[0]}</Text>
-                  {f.waiting_count > 1 && (
-                    <Text style={styles.queueWaiting}>+{f.waiting_count - 1} more</Text>
-                  )}
-                </View>
-              ) : (
-                <View style={styles.queueRow}>
-                  <Text style={styles.queueEmpty}>
-                    {f.availability_status === 'unavailable' ? 'Office closed' : 'No queue'}
-                  </Text>
-                </View>
-              )}
-
-              <Text style={styles.officeText} numberOfLines={1}>
-                <Ionicons name="location" size={10} color="#64748B" /> {f.office_location}
-              </Text>
+            <View style={[styles.queuePanel, faculty.now_serving ? styles.queuePanelActive : styles.queuePanelIdle]}>
+              {faculty.now_serving ? <><Text style={styles.queueCaption}>NOW SERVING</Text><Text style={[styles.servingNumber, compact && styles.servingNumberCompact]}>{faculty.now_serving.queue_number}</Text><Text style={styles.servingStudent} numberOfLines={1}>{faculty.now_serving.student_names.join(', ')}</Text></> : <><Text style={styles.queueCaption}>QUEUE STATUS</Text><Text style={styles.queueEmpty}>{faculty.availability_status === 'unavailable' ? 'OFFICE CLOSED' : faculty.waiting_count ? 'WAITING TO BE CALLED' : 'NO ONE WAITING'}</Text></>}
             </View>
-          </View>
-        ))}
-      </ScrollView>
 
-      {/* Footer */}
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>
-          <Ionicons name="sync" size={12} color="#94A3B8" />  Auto-refreshing • Real-time updates
-        </Text>
-        <Text style={styles.footerText}>Showing {data.length} faculty</Text>
+            <View style={styles.nextRow}><Text style={styles.nextLabel}>NEXT</Text>{nextNumbers.length ? nextNumbers.map((number) => <Text key={number} style={styles.nextNumber}>{number}</Text>) : <Text style={styles.nextEmpty}>—</Text>}<Text style={styles.waitingCount}>{faculty.waiting_count} waiting</Text></View>
+          </View>;
+        })}
+        {!data.length && <View style={styles.emptyState}><Ionicons name="people-outline" size={42} color="#64748B" /><Text style={styles.emptyText}>No faculty are available to display.</Text></View>}
       </View>
+
+      <View style={styles.footer}><Text style={styles.footerText}>LIVE QUEUE · Updates automatically</Text><Text style={styles.footerText}>{data.length} faculty shown</Text></View>
     </SafeAreaView>
   );
 }
 
-const { width } = Dimensions.get('window');
-
-// Responsive column count: fit as many compact cards as possible per row
-let columnCount = 2;
-if (width >= 1600) columnCount = 4;
-else if (width >= 1200) columnCount = 3;
-else if (width >= 800) columnCount = 2;
-else columnCount = 1;
-
-// Card width accounting for gap (12px)
-const gap = 12;
-const cardWidth = `${(100 / columnCount) - (gap * (columnCount - 1) / (columnCount * width / 100)) / columnCount}%`;
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F172A' },
-  announcementOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 20, backgroundColor: 'rgba(15, 23, 42, 0.94)', alignItems: 'center', justifyContent: 'center', padding: 32 },
-  announcementCard: { width: '90%', maxWidth: 760, alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 24, padding: 42, borderWidth: 4, borderColor: '#2196F3' },
-  announcementTitle: { marginTop: 14, color: '#2196F3', fontSize: 22, fontWeight: '800', letterSpacing: 1 },
-  announcementStudent: { marginTop: 22, color: '#0F172A', fontSize: 36, fontWeight: '800', textAlign: 'center' },
-  announcementDate: { marginTop: 18, color: '#1E293B', fontSize: 26, fontWeight: '700' },
-  announcementTime: { marginTop: 6, color: '#2196F3', fontSize: 30, fontWeight: '800' },
-  announcementHint: { marginTop: 28, color: '#64748B', fontSize: 14 },
-  loadingContainer: { flex: 1, backgroundColor: '#0F172A', alignItems: 'center', justifyContent: 'center' },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: '#1E293B',
-    borderBottomWidth: 2,
-    borderBottomColor: '#2196F3',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  headerLeft: {},
-  brand: { fontSize: 24, fontWeight: '800', color: '#FFFFFF', letterSpacing: 1 },
-  brandSubtitle: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
-  summaryRow: { flexDirection: 'row', gap: 8, flexShrink: 0 },
-  summaryChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    backgroundColor: '#0F172A',
-  },
-  summaryDot: { width: 8, height: 8, borderRadius: 4 },
-  summaryChipText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
-  headerRight: { alignItems: 'flex-end' },
-  soundButton: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, backgroundColor: '#64748B' },
-  soundButtonEnabled: { backgroundColor: '#16A34A' },
-  soundButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
-  time: { fontSize: 24, fontWeight: '700', color: '#2196F3', fontVariant: ['tabular-nums'] },
-  date: { fontSize: 11, color: '#94A3B8', marginTop: 2 },
-  grid: {
-    padding: 12,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  card: {
-    width: cardWidth as any,
-    minWidth: 300,
-    flexDirection: 'row',
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#334155',
-    gap: 12,
-    alignItems: 'center',
-  },
-  avatarWrap: { position: 'relative' },
-  avatarRing: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 3,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 2,
-  },
-  avatar: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: '#2196F3',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarImage: { width: '100%', height: '100%', borderRadius: 27 },
-  avatarText: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
-  statusDot: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 2,
-    borderColor: '#1E293B',
-  },
-  cardBody: { flex: 1, gap: 4 },
-  facultyName: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
-  statusRow: { flexDirection: 'row', alignItems: 'center' },
-  statusPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  statusPillText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
-  queueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 2,
-    flexWrap: 'wrap',
-  },
-  queueLabel: { fontSize: 10, color: '#94A3B8', fontWeight: '600', letterSpacing: 0.8 },
-  queueNumber: { fontSize: 20, color: '#2196F3', fontWeight: '800' },
-  queueNumberNext: { fontSize: 18, color: '#94A3B8', fontWeight: '700' },
-  queueWaiting: { fontSize: 10, color: '#64748B', fontWeight: '500' },
-  queueEmpty: { fontSize: 11, color: '#64748B', fontStyle: 'italic' },
-  officeText: { fontSize: 10, color: '#64748B', marginTop: 2 },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 10,
-    backgroundColor: '#1E293B',
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-  },
-  footerText: { color: '#94A3B8', fontSize: 11 },
+  container: { flex: 1, backgroundColor: '#0F172A', overflow: 'hidden' },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F172A' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 22, paddingVertical: 11, backgroundColor: '#172554', borderBottomWidth: 2, borderBottomColor: '#38BDF8' },
+  headerCompact: { paddingHorizontal: 12, paddingVertical: 7 },
+  brand: { color: '#FFFFFF', fontSize: 25, fontWeight: '900', letterSpacing: 0.5 }, brandCompact: { fontSize: 19 }, brandSubtitle: { color: '#BFDBFE', fontSize: 11, marginTop: 1 },
+  summaryRow: { flexDirection: 'row', gap: 8 }, summaryAvailable: { color: '#BBF7D0', backgroundColor: '#166534', paddingHorizontal: 9, paddingVertical: 5, borderRadius: 20, fontSize: 11, fontWeight: '800' }, summaryBusy: { color: '#FDE68A', backgroundColor: '#92400E', paddingHorizontal: 9, paddingVertical: 5, borderRadius: 20, fontSize: 11, fontWeight: '800' },
+  clock: { alignItems: 'flex-end' }, soundButton: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#64748B', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 3 }, soundButtonOn: { backgroundColor: '#16A34A' }, soundText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' }, time: { color: '#FFFFFF', fontSize: 23, fontWeight: '800', fontVariant: ['tabular-nums'] }, timeCompact: { fontSize: 17 }, date: { color: '#BFDBFE', fontSize: 10 },
+  grid: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', alignContent: 'flex-start', overflow: 'hidden' }, card: { backgroundColor: '#1E293B', borderRadius: 14, borderLeftWidth: 6, padding: 11, justifyContent: 'space-between', overflow: 'hidden' },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 8 }, avatar: { width: 38, height: 38, borderRadius: 19, borderWidth: 2, backgroundColor: '#334155', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }, avatarImage: { width: '100%', height: '100%' }, avatarText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' }, nameBlock: { flex: 1, minWidth: 0 }, facultyName: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' }, facultyNameCompact: { fontSize: 13 }, status: { marginTop: 1, fontSize: 9, fontWeight: '900', letterSpacing: 0.6 }, office: { maxWidth: '28%', color: '#94A3B8', fontSize: 9, textAlign: 'right' },
+  queuePanel: { minHeight: 56, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, marginVertical: 5 }, queuePanelActive: { backgroundColor: '#082F49', borderWidth: 1, borderColor: '#0EA5E9' }, queuePanelIdle: { backgroundColor: '#273449' }, queueCaption: { color: '#BAE6FD', fontSize: 9, fontWeight: '900', letterSpacing: 1.2 }, servingNumber: { color: '#FFFFFF', fontSize: 30, lineHeight: 33, fontWeight: '900' }, servingNumberCompact: { fontSize: 23, lineHeight: 27 }, servingStudent: { color: '#E0F2FE', fontSize: 10, fontWeight: '600', maxWidth: '100%' }, queueEmpty: { color: '#CBD5E1', fontSize: 13, fontWeight: '800', marginTop: 4 },
+  nextRow: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 18 }, nextLabel: { color: '#94A3B8', fontSize: 9, fontWeight: '900', letterSpacing: 0.8 }, nextNumber: { color: '#E2E8F0', fontSize: 12, fontWeight: '800', backgroundColor: '#334155', paddingHorizontal: 5, borderRadius: 5 }, nextEmpty: { color: '#64748B', fontSize: 13 }, waitingCount: { marginLeft: 'auto', color: '#94A3B8', fontSize: 10, fontWeight: '700' },
+  footer: { minHeight: 28, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 18, backgroundColor: '#172554', borderTopWidth: 1, borderTopColor: '#334155' }, footerText: { color: '#93C5FD', fontSize: 9, fontWeight: '700', letterSpacing: 0.5 }, emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', minWidth: '100%', gap: 12 }, emptyText: { color: '#CBD5E1', fontSize: 16, fontWeight: '600' },
+  announcementOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 20, backgroundColor: 'rgba(15, 23, 42, 0.95)', alignItems: 'center', justifyContent: 'center', padding: 24 }, announcementCard: { width: '88%', maxWidth: 700, alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 24, padding: 34, borderWidth: 4, borderColor: '#38BDF8' }, announcementTitle: { marginTop: 12, color: '#0284C7', fontSize: 21, fontWeight: '900', letterSpacing: 0.8 }, announcementStudent: { marginTop: 18, color: '#0F172A', fontSize: 34, fontWeight: '900', textAlign: 'center' }, announcementDate: { marginTop: 12, color: '#334155', fontSize: 22, fontWeight: '700' }, announcementHint: { marginTop: 22, color: '#64748B', fontSize: 13 },
 });
