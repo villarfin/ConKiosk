@@ -103,6 +103,24 @@ async def main():
     async with app.SessionLocal() as db:
         duplicate = await db.get(app.ConsultationRecord, duplicate_id)
         assert duplicate.status == 'cancelled' and duplicate.notes == 'Retain duplicate notes'
+    # All faculties share a persistent counter, including after empty queues/restarts.
+    async with app.SessionLocal() as db:
+        faculty = await db.scalar(select(app.Faculty).where(app.Faculty.school_id == 'QUEUE_TEST'))
+        faculty.accepting_consultations = True
+        active = await db.scalar(select(app.ConsultationRecord).where(app.ConsultationRecord.status == 'ongoing'))
+        await app.consultation_complete(active.id, None, db, faculty)
+        db.add(app.Faculty(school_id='QUEUE_OTHER', full_name='Other Faculty', password_hash='unused', department='Test', availability_status='available', accepting_consultations=True))
+        await db.commit()
+
+    async def submit_to_faculty(index):
+        async with app.SessionLocal() as db:
+            result = await app.kiosk_request(app.KioskConsultationRequest(faculty_school_id='QUEUE_TEST' if index % 2 else 'QUEUE_OTHER', topic='Shared counter', students=[app.Student(student_id=f'GLOBAL{index}', full_name=f'Global Student {index}', year_level='1', section='A')]), db)
+            return result['queue_number']
+
+    allocated = await asyncio.gather(*(submit_to_faculty(index) for index in range(10)))
+    assert len(set(allocated)) == 10 and set(allocated) == {f'A{number:03d}' for number in range(5, 15)}, allocated
+    await app.startup()
+    assert await submit_to_faculty(20) == 'A015'
     await app.engine.dispose()
     print('PASS: concurrent submissions/acceptance, duplicate protection, FIFO, automatic advancement, pending gate, notes, timing and terminal lock')
 

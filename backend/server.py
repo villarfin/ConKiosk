@@ -23,7 +23,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel as PydanticBaseModel, Field, model_validator
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text, UniqueConstraint, and_, delete, func, or_, select, text
+from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text, UniqueConstraint, and_, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from starlette.middleware.cors import CORSMiddleware
@@ -91,6 +91,11 @@ class StudentRecord(Base):
 class QueueCounter(Base):
     __tablename__ = "queue_counters"
     faculty_school_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_number: Mapped[int] = mapped_column(Integer, default=0)
+
+class GlobalQueueCounter(Base):
+    __tablename__ = 'global_queue_counter'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     last_number: Mapped[int] = mapped_column(Integer, default=0)
 
 class QueueRecord(Base):
@@ -298,22 +303,17 @@ async def current_management_viewer(faculty: Faculty = Depends(current_faculty))
     return faculty
 
 async def reset_queue_counter_if_empty(db: AsyncSession, faculty_school_id: str) -> None:
-    """Start a new queue at #1 after its last active entry has left the queue."""
+    """Remove closed live tickets without resetting the shared number counter."""
     active_count = await db.scalar(select(func.count()).select_from(QueueRecord).where(and_(
         QueueRecord.faculty_school_id == faculty_school_id,
         QueueRecord.status.in_(["waiting", "serving"]),
     )))
     if not active_count:
-        # Queue numbers are reused from #1 for a new, empty queue. Closed queue
-        # entries are no longer needed by the live board (consultation history
-        # retains its own queue-number snapshot).
+        # Consultation history retains its own queue-number snapshot.
         await db.execute(delete(QueueRecord).where(and_(
             QueueRecord.faculty_school_id == faculty_school_id,
             QueueRecord.status.in_(["completed", "cancelled"]),
         )))
-        counter = await db.get(QueueCounter, faculty_school_id)
-        if counter:
-            counter.last_number = 0
 
 async def lock_faculty_queue(db: AsyncSession, faculty: Faculty) -> None:
     """Serialize all queue mutations for a faculty, including empty queues."""
@@ -404,6 +404,15 @@ async def startup():
         await conn.execute(text("ALTER TABLE queue ADD COLUMN IF NOT EXISTS student_details JSON NOT NULL DEFAULT '[]'"))
         await conn.execute(text("ALTER TABLE consultations ALTER COLUMN student_id TYPE TEXT"))
         await conn.execute(text("ALTER TABLE consultation_requests ALTER COLUMN student_id TYPE TEXT"))
+        # Bootstrap above every known legacy ticket; never move backwards on restart.
+        await conn.execute(text("""INSERT INTO global_queue_counter (id, last_number)
+            SELECT 1, COALESCE(MAX(number), 0) FROM (
+                SELECT queue_number AS number FROM queue
+                UNION ALL SELECT queue_number FROM consultations
+                UNION ALL SELECT queue_number FROM consultation_requests
+                UNION ALL SELECT last_number FROM queue_counters
+            ) known ON CONFLICT (id) DO UPDATE
+            SET last_number = GREATEST(global_queue_counter.last_number, EXCLUDED.last_number)"""))
         await conn.execute(text("""UPDATE consultations c SET students = (SELECT json_agg(json_build_object('student_id', ids.value, 'full_name', names.value)) FROM json_array_elements_text(q.student_ids) WITH ORDINALITY ids(value, n) JOIN json_array_elements_text(q.student_names) WITH ORDINALITY names(value,n) USING (n)) FROM queue q WHERE c.queue_id=q.id AND json_array_length(c.students)=0"""))
         await conn.execute(text("ALTER TABLE consultations ADD COLUMN IF NOT EXISTS started_at TIMESTAMP NULL"))
         await conn.execute(text("""
@@ -764,9 +773,7 @@ async def kiosk_request(payload: KioskConsultationRequest, db: AsyncSession = De
             record.program = student.program
             record.year_level = student.year_level
             record.section = student.section
-    # Remove historical closed entries before allocating a fresh queue number.
-    # This keeps the A001 reset rule compatible with the database's per-faculty
-    # unique queue-number constraint, including records created by older versions.
+    # Closed live tickets may be removed, but numbering never resets.
     active_count = await db.scalar(select(func.count()).select_from(QueueRecord).where(and_(
         QueueRecord.faculty_school_id == faculty.school_id,
         QueueRecord.status.in_(["waiting", "serving"]),
@@ -776,11 +783,10 @@ async def kiosk_request(payload: KioskConsultationRequest, db: AsyncSession = De
             QueueRecord.faculty_school_id == faculty.school_id,
             QueueRecord.status.in_(["completed", "cancelled"]),
         )))
-    counter = await db.scalar(select(QueueCounter).where(QueueCounter.faculty_school_id == faculty.school_id).with_for_update())
-    if not counter: counter = QueueCounter(faculty_school_id=faculty.school_id, last_number=0); db.add(counter); await db.flush()
-    elif not active_count: counter.last_number = 0
-    counter.last_number += 1; names = [student.full_name for student in payload.students]; ids = [student.student_id for student in payload.students]
-    queue = QueueRecord(faculty_school_id=faculty.school_id, queue_number=counter.last_number, student_ids=ids, student_names=names, student_details=[student.model_dump() for student in payload.students], topic=payload.topic, consultation_type=payload.consultation_type)
+    number = await db.scalar(update(GlobalQueueCounter).where(GlobalQueueCounter.id == 1).values(last_number=GlobalQueueCounter.last_number + 1).returning(GlobalQueueCounter.last_number))
+    if number is None: raise HTTPException(503, 'Queue numbering is not ready. Please retry shortly.')
+    names = [student.full_name for student in payload.students]; ids = [student.student_id for student in payload.students]
+    queue = QueueRecord(faculty_school_id=faculty.school_id, queue_number=number, student_ids=ids, student_names=names, student_details=[student.model_dump() for student in payload.students], topic=payload.topic, consultation_type=payload.consultation_type)
     db.add(queue); await db.flush(); display = names[0] if len(names) == 1 else f"{names[0]} +{len(names)-1} more"
     db.add(ConsultationRequestRecord(faculty_school_id=faculty.school_id, student_id=",".join(ids), student_name=display, student_program=f"{payload.students[0].program} • {payload.students[0].year_level} - {payload.students[0].section}", topic=payload.topic, preferred_date=local_today(), preferred_time="Walk-in", queue_id=queue.id, queue_number=queue.queue_number, consultation_type=payload.consultation_type))
     db.add(NotificationRecord(faculty_school_id=faculty.school_id, type="new_request", title="New Kiosk Consultation Request", message=f"{display} requested consultation (Queue #{queue.queue_number})"))

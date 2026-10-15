@@ -118,9 +118,12 @@ in faculty History. Future appointments display as Scheduled and cannot start
 before their date. Rescheduling creates a future appointment and removes the
 original ticket from the active queue. There is no automatic appointment reminder.
 
-Queue numbers are per faculty, so two offices can each have `A001`. Identify a
-ticket using its faculty/office as well as its number. An empty queue resets its
-numbering; consultation history retains its own ticket/group snapshot.
+New queue numbers use one persistent counter shared by every faculty. Two students
+submitting simultaneously to different faculty receive different numbers. Numbering
+continues when queues empty and after server restarts; it does not reset per faculty
+or per day. Consultation history retains its ticket/group snapshot. Tickets issued
+before this change keep their original numbers and should still be identified by
+faculty/office; legacy duplicates disappear from the live board as those tickets close.
 
 The TV uses navy blue, gold, and white, fits all faculty cards into its available
 area, and shows large queue numbers in a separate full-height right panel. Queue
