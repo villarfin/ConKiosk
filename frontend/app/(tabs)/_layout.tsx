@@ -1,14 +1,16 @@
-import { Tabs } from 'expo-router';
+import { Tabs, Redirect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Platform } from 'react-native';
+import { Platform, ActivityIndicator, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 export default function TabsLayout() {
-  const { faculty } = useAuth();
+  const { faculty, isAuthenticated, initializing } = useAuth();
   const insets = useSafeAreaInsets();
   // Leave enough space for Android gesture/navigation areas as well as labels.
   const bottomPadding = Math.max(insets.bottom, 10);
+  if (initializing) return <View style={{ flex: 1, justifyContent: 'center' }}><ActivityIndicator /></View>;
+  if (!isAuthenticated) return <Redirect href="/login" />;
   return (
     <Tabs
       screenOptions={{

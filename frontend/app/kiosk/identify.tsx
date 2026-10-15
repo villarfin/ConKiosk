@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiUrl } from '@/src/config/api';
+import { setKioskDraft } from '@/src/utils/kiosk-draft';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 
@@ -131,8 +132,8 @@ export default function IdentifyScreen() {
           section: '',
         });
         Alert.alert(
-          'Student Not Found',
-          'Your ID and available QR details were filled in. Please complete the remaining information manually.'
+          response.status === 403 ? 'Enter Student Details' : 'Student Not Found',
+          response.status === 403 ? 'Student lookup is available on the physical kiosk. You can continue here without signing in by completing your student details.' : 'Your ID and available QR details were filled in. Please complete the remaining information manually.'
         );
       }
     } catch {
@@ -198,17 +199,6 @@ export default function IdentifyScreen() {
       return;
     }
 
-    // Save student to backend
-    try {
-      await fetch(apiUrl('/kiosk/students'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentStudent),
-      });
-    } catch {
-      // Non-critical - continue anyway
-    }
-
     setStudents([...students, currentStudent]);
     setCurrentStudent({ student_id: '', full_name: '', program: '', year_level: '', section: '' });
     setTimeout(() => scanInputRef.current?.focus(), 100);
@@ -244,6 +234,7 @@ export default function IdentifyScreen() {
       return;
     }
 
+    setKioskDraft(allStudents);
     router.push({
       pathname: '/kiosk/request',
       params: {
@@ -251,7 +242,6 @@ export default function IdentifyScreen() {
         faculty_name: params.faculty_name,
         faculty_office: params.faculty_office,
         consultation_type: consultationType,
-        students: JSON.stringify(allStudents),
       },
     });
   };

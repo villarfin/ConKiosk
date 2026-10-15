@@ -1,18 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, Redirect } from 'expo-router';
 import { ApiClient } from '@/src/utils/api';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 export default function AdminAccount() {
-  const { faculty, updateFaculty } = useAuth();
+  const { faculty, updateFaculty, initializing } = useAuth();
   const router = useRouter();
   const [name, setName] = useState(faculty?.full_name || '');
   const [email, setEmail] = useState(faculty?.email || '');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  useEffect(() => { if (faculty) { setName(faculty.full_name); setEmail(faculty.email); } }, [faculty?._id]);
   const saveProfile = async () => {
     try { const updated = await ApiClient.patch('/faculty/profile', { full_name: name, email }); updateFaculty(updated); Alert.alert('Saved', 'Administrator profile updated.'); }
     catch (error: any) { Alert.alert('Unable to save', error.message || 'Please try again.'); }
@@ -20,9 +21,10 @@ export default function AdminAccount() {
   const changePassword = async () => {
     if (!currentPassword || !newPassword) return Alert.alert('Missing details', 'Enter the current and new password.');
     if (newPassword.length < 8) return Alert.alert('Password too short', 'Use at least 8 characters.');
-    try { await ApiClient.post('/auth/change-password', { current_password: currentPassword, new_password: newPassword }); setCurrentPassword(''); setNewPassword(''); Alert.alert('Password changed', 'Share the new credentials securely with the incoming IT Chair.'); }
+    try { await ApiClient.post('/auth/change-password', { current_password: currentPassword, new_password: newPassword }); setCurrentPassword(''); setNewPassword(''); Alert.alert('Password changed', 'All sessions have ended. Sign in with your new password.'); router.replace('/login'); }
     catch (error: any) { Alert.alert('Unable to change password', error.message || 'Check the current password.'); }
   };
+  if (!initializing && faculty?.role !== 'admin') return <Redirect href="/login" />;
   return <SafeAreaView style={styles.container}><ScrollView contentContainerStyle={styles.content}><TouchableOpacity onPress={() => router.replace('/admin')} style={styles.back}><Ionicons name="arrow-back" size={20} color="#1D4ED8" /><Text style={styles.backText}>Administrator dashboard</Text></TouchableOpacity><View style={styles.icon}><Ionicons name="shield-checkmark" size={38} color="#1D4ED8" /></View><Text style={styles.title}>Administrator Account</Text><Text style={styles.subtitle}>This is the permanent system-administrator account. Keep its credentials restricted to authorized administrators.</Text><Text style={styles.id}>Account ID: {faculty?.school_id}</Text><Section title="Profile"><Field label="Display name" value={name} onChangeText={setName} /><Field label="Email" value={email} onChangeText={setEmail} keyboardType="email-address" /><Button label="Save profile" onPress={saveProfile} /></Section><Section title="Transfer / change password"><Text style={styles.help}>When transferring administrator responsibility, change the password and give the account credentials only to the authorized replacement.</Text><Field label="Current password" value={currentPassword} onChangeText={setCurrentPassword} secureTextEntry /><Field label="New password" value={newPassword} onChangeText={setNewPassword} secureTextEntry /><Button label="Change password" onPress={changePassword} /></Section></ScrollView></SafeAreaView>;
 }
 function Section({ title, children }: { title: string; children: React.ReactNode }) { return <View style={styles.section}><Text style={styles.sectionTitle}>{title}</Text>{children}</View>; }

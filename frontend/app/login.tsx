@@ -135,6 +135,7 @@ export default function LoginScreen() {
 
             {loginError ? <View accessibilityLiveRegion="assertive" style={styles.loginError}><Ionicons name="alert-circle-outline" size={18} color="#B91C1C" /><Text style={styles.loginErrorText}>{loginError}</Text></View> : null}
 
+            <Text style={{ color: '#64748B', textAlign: 'center', marginTop: 16 }}>Forgot your password? Ask the administrator to reset your faculty account. Students can use the kiosk without signing in.</Text>
             <TouchableOpacity style={styles.signupLink} onPress={() => router.push('/signup')}>
               <Text style={styles.signupLinkText}>New faculty? Create an account</Text>
             </TouchableOpacity>

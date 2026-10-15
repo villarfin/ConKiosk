@@ -3,6 +3,9 @@ Description=ConKiosk PostgreSQL backup
 
 [Service]
 Type=oneshot
-User=conkiosk
-WorkingDirectory=/home/conkiosk/ConKiosk
-ExecStart=/home/conkiosk/ConKiosk/deploy/backup-postgres.sh
+User=postgres
+Environment=CONKIOSK_BACKUP_DATABASE=conkiosk
+Environment=CONKIOSK_BACKUP_USER=postgres
+EnvironmentFile=-/etc/conkiosk/backup.env
+WorkingDirectory=/var/lib/conkiosk/backups
+ExecStart=/usr/local/lib/conkiosk/backup-postgres.sh

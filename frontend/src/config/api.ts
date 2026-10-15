@@ -7,7 +7,10 @@
  * EXPO_PUBLIC_BACKEND_URL is retained only as a backwards-compatible fallback
  * for existing local deployments. Neither value may be localhost on a phone.
  */
-const configuredUrl = (process.env.EXPO_PUBLIC_API_URL || process.env.EXPO_PUBLIC_BACKEND_URL || '').trim();
+const environmentUrl = (process.env.EXPO_PUBLIC_API_URL || process.env.EXPO_PUBLIC_BACKEND_URL || '').trim();
+const configuredUrl = typeof window !== 'undefined' && ['', '80', '443'].includes(window.location.port)
+  ? `${window.location.origin}/api`
+  : environmentUrl;
 
 export const API_URL = configuredUrl.replace(/\/+$/, '').replace(/\/api$/, '') + '/api';
 export const API_ORIGIN = API_URL.replace(/\/api$/, '');
@@ -18,4 +21,8 @@ export function apiUrl(path: string) {
 
 export function serverHealthUrl() {
   return apiUrl('/health');
+}
+
+export function photoUrl(value: string) {
+  return value.startsWith('/api/') ? `${API_ORIGIN}${value}` : value;
 }

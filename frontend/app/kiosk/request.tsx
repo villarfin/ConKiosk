@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiUrl } from '@/src/config/api';
+import { getKioskDraft, clearKioskDraft } from '@/src/utils/kiosk-draft';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 
@@ -35,11 +36,12 @@ export default function RequestScreen() {
     students: string;
   }>();
 
-  const students: Student[] = params.students ? JSON.parse(params.students) : [];
+  const { students, submissionId } = getKioskDraft();
   const [topic, setTopic] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async () => {
+    if (!students.length) { Alert.alert('Student details needed', 'Please return to the kiosk and identify the student again.'); return; }
     if (!topic.trim()) {
       Alert.alert('Missing Topic', 'Please describe your consultation topic');
       return;
@@ -57,6 +59,7 @@ export default function RequestScreen() {
           topic: topic.trim(),
           consultation_type: params.consultation_type,
           students: students,
+          submission_id: submissionId,
         }),
       });
 
@@ -66,6 +69,7 @@ export default function RequestScreen() {
       }
 
       const data = await response.json();
+      clearKioskDraft();
 
       router.replace({
         pathname: '/kiosk/confirmation',

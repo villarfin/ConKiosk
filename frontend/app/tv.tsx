@@ -3,7 +3,7 @@ import { ActivityIndicator, Image, StyleSheet, Text, TouchableOpacity, useWindow
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { RealtimeClient } from '@/src/utils/realtime';
-import { apiUrl } from '@/src/config/api';
+import { apiUrl, photoUrl } from '@/src/config/api';
 
 let announcementAudioContext: AudioContext | null = null;
 
@@ -157,7 +157,7 @@ export default function TVDisplay() {
           <View style={[styles.facultyGrid, { flex: 1, minHeight: 0, gap: 0 }]} onLayout={({ nativeEvent: { layout } }) => setFacultySpace(previous => previous.width === layout.width && previous.height === layout.height ? previous : { width: layout.width, height: layout.height })}>{faculty.map(person => {
             const color = person.availability_status === 'available' ? '#15803D' : person.availability_status === 'busy' ? '#B8860B' : '#B91C1C';
             return <View key={person.school_id} style={{ width: slotWidth, height: slotHeight, alignItems: 'center', justifyContent: 'center' }}><View style={[styles.facultyTile, { width: 330, height: 140, flexShrink: 0, borderLeftColor: color, transform: [{ scale: cardScale }] }]}>
-              <View style={[styles.profileCircle, { borderColor: color }]}>{person.profile_image ? <Image source={{ uri: person.profile_image }} accessibilityLabel={`${person.full_name} profile photo`} style={styles.profilePhoto} /> : <Ionicons name="person" size={26} color="#C8A348" />}</View>
+              <View style={[styles.profileCircle, { borderColor: color }]}>{person.profile_image ? <Image source={{ uri: photoUrl(person.profile_image) }} accessibilityLabel={`${person.full_name} profile photo`} style={styles.profilePhoto} /> : <Ionicons name="person" size={26} color="#C8A348" />}</View>
               <View style={styles.facultyDetails}><Text style={styles.facultyCardName} numberOfLines={2}>{person.full_name}</Text><View style={styles.facultyOfficeRow}><Ionicons name="location-outline" size={12} color="#64748B" /><Text style={styles.facultyCardOffice} numberOfLines={1}>{person.office_location || 'Office not specified'}</Text></View><View style={styles.facultyStatusRow}><View style={[styles.availabilityDot, { backgroundColor: color }]} /><Text style={[styles.facultyStatusText, { color }]}>{person.availability_status.toUpperCase()}</Text></View></View>
             </View></View>;
           })}</View>

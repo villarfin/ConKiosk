@@ -1,4 +1,5 @@
 import { storage } from '@/src/utils/storage';
+import { timedFetch } from '@/src/utils/network';
 import { apiUrl } from '@/src/config/api';
 
 export class ApiClient {
@@ -12,13 +13,14 @@ export class ApiClient {
 
   static async get(endpoint: string) {
     const headers = await this.getHeaders();
-    const response = await fetch(apiUrl(endpoint), {
+    const response = await timedFetch(apiUrl(endpoint), {
       method: 'GET',
       headers,
     });
 
     if (!response.ok) {
-      throw new Error(`API Error: ${response.statusText}`);
+      const error = await response.json().catch(() => null);
+      throw new Error(error?.detail || `API Error: ${response.statusText}`);
     }
 
     return response.json();
@@ -26,7 +28,7 @@ export class ApiClient {
 
   static async post(endpoint: string, data?: any) {
     const headers = await this.getHeaders();
-    const response = await fetch(apiUrl(endpoint), {
+    const response = await timedFetch(apiUrl(endpoint), {
       method: 'POST',
       headers,
       body: data ? JSON.stringify(data) : undefined,
@@ -42,7 +44,7 @@ export class ApiClient {
 
   static async patch(endpoint: string, data?: any) {
     const headers = await this.getHeaders();
-    const response = await fetch(apiUrl(endpoint), {
+    const response = await timedFetch(apiUrl(endpoint), {
       method: 'PATCH',
       headers,
       body: data ? JSON.stringify(data) : undefined,
@@ -58,7 +60,7 @@ export class ApiClient {
 
   static async delete(endpoint: string, data?: any) {
     const headers = await this.getHeaders();
-    const response = await fetch(apiUrl(endpoint), {
+    const response = await timedFetch(apiUrl(endpoint), {
       method: 'DELETE',
       headers,
       body: data ? JSON.stringify(data) : undefined,

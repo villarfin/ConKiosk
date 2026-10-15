@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ApiClient } from '@/src/utils/api';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { Pagination } from '@/src/components/Pagination';
 
 interface Notification {
   _id: string;
@@ -27,11 +28,12 @@ export default function NotificationsScreen() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [page, setPage] = useState(0);
   const { realtime } = useAuth();
 
   useEffect(() => {
     loadNotifications();
-  }, []);
+  }, [page]);
 
   // Real-time updates via the native WebSocket endpoint.
   useEffect(() => {
@@ -39,11 +41,11 @@ export default function NotificationsScreen() {
     return realtime.subscribe(({ type }) => {
       if (type === 'new_notification' || type === 'consultation_accepted') loadNotifications();
     });
-  }, [realtime]);
+  }, [realtime, page]);
 
   const loadNotifications = async () => {
     try {
-      const data = await ApiClient.get('/notifications');
+      const data = await ApiClient.get(`/notifications?limit=100&offset=${page * 100}`);
       setNotifications(data);
     } catch (error: any) {
       console.error('Error loading notifications:', error);
@@ -193,6 +195,7 @@ export default function NotificationsScreen() {
           })
         )}
       </ScrollView>
+      <Pagination page={page} count={notifications.length} onChange={setPage} />
     </SafeAreaView>
   );
 }

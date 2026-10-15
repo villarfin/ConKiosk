@@ -3,10 +3,10 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 export default function Index() {
-  const { isAuthenticated, faculty } = useAuth();
+  const { isAuthenticated, faculty, initializing } = useAuth();
 
   // Show loading while checking auth
-  if (isAuthenticated === null) {
+  if (initializing) {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" color="#2196F3" />

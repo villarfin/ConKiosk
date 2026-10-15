@@ -11,7 +11,6 @@ export function websocketUrl(facultyId?: string, token?: string) {
   const base = API_ORIGIN.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
   const params = new URLSearchParams();
   if (facultyId) params.set('faculty_id', facultyId);
-  if (token) params.set('token', token);
   const query = params.toString() ? `?${params.toString()}` : '';
   return `${base}/ws${query}`;
 }
@@ -30,7 +29,10 @@ export class RealtimeClient {
     if (this.socket || this.reconnectTimer) return;
     this.closedByClient = false;
     const socket = new WebSocket(websocketUrl(this.facultyId, this.token));
-    socket.onopen = () => { this.reconnectAttempts = 0; };
+    socket.onopen = () => {
+      this.reconnectAttempts = 0;
+      if (this.facultyId && this.token) socket.send(JSON.stringify({ token: this.token }));
+    };
     socket.onmessage = ({ data }) => {
       try {
         const event = JSON.parse(data) as RealtimeEvent;

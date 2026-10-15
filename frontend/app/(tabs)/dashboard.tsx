@@ -88,7 +88,7 @@ export default function DashboardScreen() {
 
       Alert.alert('Success', `Status changed to ${status}`);
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to update availability');
+      Alert.alert('Error', error.message || 'Failed to update availability');
     }
   };
   const chooseBusyStatus = () => setBusyChoiceVisible(true);
@@ -232,7 +232,7 @@ export default function DashboardScreen() {
           <View style={[styles.statCard, { backgroundColor: '#E3F2FD' }]}>
             <Ionicons name="calendar-outline" size={32} color="#2196F3" />
             <Text style={styles.statValue}>{stats?.today_count || 0}</Text>
-            <Text style={styles.statLabel}>Todays Consultations</Text>
+            <Text style={styles.statLabel}>Completed Today</Text>
           </View>
 
           <View style={[styles.statCard, { backgroundColor: '#FFF3E0' }]}>
@@ -244,7 +244,7 @@ export default function DashboardScreen() {
           <View style={[styles.statCard, { backgroundColor: '#E8F5E9' }]}>
             <Ionicons name="checkmark-done-outline" size={32} color="#4CAF50" />
             <Text style={styles.statValue}>{stats?.monthly_count || 0}</Text>
-            <Text style={styles.statLabel}>This Month</Text>
+            <Text style={styles.statLabel}>Completed This Month</Text>
           </View>
         </View>
 

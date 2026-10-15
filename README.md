@@ -552,3 +552,9 @@ System architecture based on the ConKiosk specification.
 ---
 
 **For deployment questions, refer to `RPI5_DEPLOYMENT.md`.**
+
+# Security and records update
+
+See [deployment and security notes](deploy/HARDENING.md) for session revocation,
+anonymous student kiosk access, the two faculty-deletion choices, password recovery,
+roster matching, privacy configuration, HTTPS setup and the daily backup service.

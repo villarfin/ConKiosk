@@ -20,3 +20,10 @@ This script uses the local database credentials but forces the database name to
 It exercises concurrent submissions and acceptance, repeated acceptance,
 FIFO advancement, pending approval, note persistence, timing, terminal locks,
 and faculty acceptance restrictions.
+
+# Security, account lifecycle and kiosk regression
+
+Run `backend/venv/bin/python backend/tests/security_regression.py` from the
+repository root. It uses the same disposable `conkiosk_queue_regression` database,
+starts an HTTP/WebSocket test server on loopback port 18009, and resets only that
+database. Run it sequentially with `queue_regression.py`, never in parallel.

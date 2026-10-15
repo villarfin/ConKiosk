@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { RealtimeClient } from '@/src/utils/realtime';
-import { apiUrl } from '@/src/config/api';
+import { apiUrl, photoUrl } from '@/src/config/api';
 
 interface Faculty {
   school_id: string;
@@ -158,7 +158,7 @@ export default function KioskHome() {
               <View style={styles.cardHeader}>
                 <View style={styles.avatarContainer}>
                   {f.profile_image ? (
-                    <Image source={{ uri: f.profile_image }} style={styles.avatar} />
+                    <Image source={{ uri: photoUrl(f.profile_image) }} style={styles.avatar} />
                   ) : (
                     <View style={styles.avatarPlaceholder}>
                       <Text style={styles.avatarText}>

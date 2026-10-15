@@ -88,7 +88,7 @@ export default function ProfileScreen() {
       updateFaculty(updated);
       Alert.alert('Success', 'Profile picture updated');
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to update profile picture');
+      Alert.alert('Error', error.message || 'Failed to update profile picture');
     } finally {
       setSaving(false);
     }

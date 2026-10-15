@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { timedFetch } from '@/src/utils/network';
 import { storage } from '@/src/utils/storage';
 import { RealtimeClient } from '@/src/utils/realtime';
 import { apiUrl } from '@/src/config/api';
@@ -20,6 +21,7 @@ interface Faculty {
 
 interface AuthContextType {
   isAuthenticated: boolean;
+  initializing: boolean;
   faculty: Faculty | null;
   token: string | null;
   login: (schoolId: string, password: string) => Promise<'faculty' | 'admin' | 'it_chair'>;
@@ -32,6 +34,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [initializing, setInitializing] = useState(true);
   const [faculty, setFaculty] = useState<Faculty | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [realtime, setRealtime] = useState<RealtimeClient | null>(null);
@@ -60,7 +63,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!realtime) return;
     return realtime.subscribe((event) => {
       if (event.type === 'account_deleted') {
-        void logout().finally(() => router.replace('/login'));
+        void clearLocalSession().finally(() => router.replace('/login'));
+      }
+      if (event.type === 'role_changed' && token) {
+        void timedFetch(apiUrl('/faculty/profile'), { headers: { Authorization: `Bearer ${token}` } }).then(async response => { if (response.ok) updateFaculty(await response.json()); }).catch(() => {});
       }
     });
   }, [realtime]);
@@ -71,8 +77,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!isAuthenticated || !token) return;
     const validateSession = async () => {
       try {
-        const response = await fetch(apiUrl('/faculty/profile'), { headers: { Authorization: `Bearer ${token}` } });
-        if (response.status === 401) await logout();
+        const response = await timedFetch(apiUrl('/faculty/profile'), { headers: { Authorization: `Bearer ${token}` } });
+        if (response.status === 401) { await clearLocalSession(); router.replace('/login'); }
+        else if (response.ok) updateFaculty(await response.json());
       } catch { /* Keep the local session during a short LAN interruption. */ }
     };
     const timer = setInterval(validateSession, 30_000);
@@ -85,18 +92,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const storedFaculty = await storage.getItem('faculty_data', null);
 
       if (storedToken && storedFaculty) {
-        setToken(storedToken);
-        setFaculty(storedFaculty);
-        setIsAuthenticated(true);
+        const response = await timedFetch(apiUrl('/faculty/profile'), { headers: { Authorization: `Bearer ${storedToken}` }, timeoutMs: 8000 });
+        if (response.ok) {
+          setToken(storedToken);
+          setFaculty(await response.json());
+          setIsAuthenticated(true);
+        } else if (response.status === 401) await clearLocalSession();
       }
     } catch (error) {
       console.error('Error initializing auth:', error);
-    }
+    } finally { setInitializing(false); }
   };
 
   const login = async (schoolId: string, password: string): Promise<'faculty' | 'admin' | 'it_chair'> => {
     try {
-      const response = await fetch(apiUrl('/auth/login'), {
+      const response = await timedFetch(apiUrl('/auth/login'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -105,6 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           school_id: schoolId,
           password: password,
         }),
+        timeoutMs: 15000,
       });
 
       if (!response.ok) {
@@ -115,8 +126,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await response.json();
 
       // Store credentials
-      await storage.secureSet('auth_token', data.access_token);
-      await storage.setItem('faculty_data', data.faculty);
+      if (!await storage.secureSet('auth_token', data.access_token) || !await storage.setItem('faculty_data', data.faculty)) {
+        await clearLocalSession();
+        throw new Error('Unable to save your session. Please check browser/device storage.');
+      }
 
       setToken(data.access_token);
       setFaculty(data.faculty);
@@ -128,11 +141,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const clearLocalSession = async () => {
+    await storage.secureRemove('auth_token');
+    await storage.removeItem('faculty_data');
+    realtime?.disconnect();
+    setRealtime(null);
+    setToken(null);
+    setFaculty(null);
+    setIsAuthenticated(false);
+  };
+
   const logout = async () => {
     try {
       // Tell the server first so the kiosk and TV stop offering this faculty immediately.
       if (token) {
-        await fetch(apiUrl('/auth/logout'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+        await timedFetch(apiUrl('/auth/logout'), { method: 'POST', headers: { Authorization: `Bearer ${token}` }, timeoutMs: 4000 });
       }
     } catch (error) {
       // Local sign-out must still succeed if Wi-Fi drops during the server request.
@@ -161,6 +184,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider
       value={{
         isAuthenticated,
+        initializing,
         faculty,
         token,
         login,

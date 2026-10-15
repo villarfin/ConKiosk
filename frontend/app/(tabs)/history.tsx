@@ -15,6 +15,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ApiClient } from '@/src/utils/api';
 import { useFocusEffect } from 'expo-router';
+import { ActionDialog } from '@/src/components/ActionDialog';
+import { Pagination } from '@/src/components/Pagination';
+import { consultationStatusLabel } from '@/src/utils/consultation-status';
 
 interface Consultation {
   _id: string;
@@ -27,6 +30,9 @@ interface Consultation {
   duration?: number;
   status: string;
   notes?: string;
+  queue_id?: string;
+  remarks?: string;
+  students?: { student_id: string; full_name: string }[];
 }
 
 const STATUS_FILTERS = ['all', 'scheduled', 'ongoing', 'completed', 'cancelled'];
@@ -41,12 +47,16 @@ export default function HistoryScreen() {
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [editNotes, setEditNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [page, setPage] = useState(0);
+  const [pendingAction, setPendingAction] = useState<'complete' | 'pause' | 'cancel' | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  useEffect(() => { setPage(0); }, [statusFilter, searchQuery]);
 
   useFocusEffect(useCallback(() => {
     loadHistory();
     const timer = setInterval(loadHistory, 5000);
     return () => clearInterval(timer);
-  }, [statusFilter, searchQuery]));
+  }, [statusFilter, searchQuery, page, selectedConsultation?._id]));
 
   const loadHistory = async () => {
     try {
@@ -65,8 +75,14 @@ export default function HistoryScreen() {
         endpoint += '?' + params.join('&');
       }
 
+      endpoint += `${endpoint.includes('?') ? '&' : '?'}limit=100&offset=${page * 100}`;
       const data = await ApiClient.get(endpoint);
       setConsultations(data);
+      if (selectedConsultation) {
+        const latest = await ApiClient.get(`/consultations/${selectedConsultation._id}`);
+        setSelectedConsultation(previous => previous?._id === latest._id ? latest : previous);
+        if (['completed', 'cancelled'].includes(latest.status)) setEditNotes(latest.notes || '');
+      }
     } catch (error: any) {
       console.error('Error loading history:', error);
       Alert.alert('Error', 'Failed to load consultation history');
@@ -79,7 +95,7 @@ export default function HistoryScreen() {
     setRefreshing(true);
     await loadHistory();
     setRefreshing(false);
-  }, [statusFilter, searchQuery]);
+  }, [statusFilter, searchQuery, page, selectedConsultation?._id]);
 
   const handleSearch = () => {
     loadHistory();
@@ -110,7 +126,7 @@ export default function HistoryScreen() {
       closeDetails();
       loadHistory();
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to update consultation');
+      Alert.alert('Error', error.message || 'Failed to update consultation');
     } finally {
       setSaving(false);
     }
@@ -135,7 +151,12 @@ export default function HistoryScreen() {
     if (!selectedConsultation) return;
     setSaving(true);
     try {
-      const result = await ApiClient.post(`/consultations/${selectedConsultation._id}/complete`, { notes: editNotes });
+      if (pendingAction === 'cancel') {
+        await ApiClient.post(`/consultations/${selectedConsultation._id}/cancel`, { reason: cancelReason });
+        setPendingAction(null); closeDetails(); loadHistory(); return;
+      }
+      const result = await ApiClient.post(`/consultations/${selectedConsultation._id}/complete`, { notes: editNotes, advance: pendingAction !== 'pause' });
+      setPendingAction(null);
       Alert.alert('Success', result.next_started ? 'Notes saved. Consultation completed and the next student has been called.' : 'Notes saved. Consultation completed.');
       closeDetails();
       loadHistory();
@@ -252,7 +273,7 @@ export default function HistoryScreen() {
                   <Text style={styles.studentId}>{consultation.student_id}</Text>
                 </View>
                 <View style={[styles.statusBadge, { backgroundColor: getStatusColor(consultation.status) }]}>
-                  <Text style={styles.statusText}>{consultation.status.toUpperCase()}</Text>
+                  <Text style={styles.statusText}>{consultationStatusLabel(consultation)}</Text>
                 </View>
               </View>
 
@@ -279,6 +300,7 @@ export default function HistoryScreen() {
         )}
       </ScrollView>
 
+      <Pagination page={page} count={consultations.length} onChange={setPage} />
       {/* Details Modal */}
       <Modal
         visible={detailsModalVisible}
@@ -300,7 +322,7 @@ export default function HistoryScreen() {
                 <>
                   <View style={styles.detailSection}>
                     <Text style={styles.detailLabel}>Student</Text>
-                    <Text style={styles.detailValue}>{selectedConsultation.student_name}</Text>
+                    <Text style={styles.detailValue}>{selectedConsultation.students?.length ? selectedConsultation.students.map(student => student.full_name).join(', ') : selectedConsultation.student_name}</Text>
                     <Text style={styles.detailSubValue}>
                       {selectedConsultation.student_id} • {selectedConsultation.student_program}
                     </Text>
@@ -324,7 +346,9 @@ export default function HistoryScreen() {
 
                   <View style={styles.detailSection}>
                     <Text style={styles.detailLabel}>Status</Text>
-                    <View style={[styles.statusReadOnly, { backgroundColor: getStatusColor(selectedConsultation.status) }]}><Text style={styles.statusText}>{selectedConsultation.status.toUpperCase()}</Text></View>
+                    <View style={[styles.statusReadOnly, { backgroundColor: getStatusColor(selectedConsultation.status) }]}><Text style={styles.statusText}>{consultationStatusLabel(selectedConsultation)}</Text></View>
+                    {selectedConsultation.status === 'scheduled' && selectedConsultation.queue_id && <Text style={styles.detailSubValue}>Waiting in queue order. An earlier student may still need approval or completion.</Text>}
+                    {selectedConsultation.remarks && <Text style={styles.detailSubValue}>{selectedConsultation.remarks}</Text>}
                   </View>
 
                   <View style={styles.detailSection}>
@@ -357,13 +381,16 @@ export default function HistoryScreen() {
                     <TouchableOpacity
                       testID="complete-consultation-btn"
                       style={styles.completeButton}
-                      onPress={completeConsultation}
+                      onPress={() => setPendingAction('complete')}
                       disabled={saving}
                     >
                       <Ionicons name="checkmark-done" size={20} color="#4CAF50" />
                       <Text style={styles.completeButtonText}>Complete & Advance Queue</Text>
                     </TouchableOpacity>
                   )}
+
+                  {selectedConsultation.status === 'ongoing' && <TouchableOpacity style={styles.completeButton} disabled={saving} onPress={() => setPendingAction('pause')}><Text style={styles.completeButtonText}>Complete & Pause Queue</Text></TouchableOpacity>}
+                  {['scheduled', 'ongoing'].includes(selectedConsultation.status) && <TouchableOpacity style={styles.completeButton} disabled={saving} onPress={() => { setCancelReason(''); setPendingAction('cancel'); }}><Text style={{ color: '#B91C1C', fontWeight: '700' }}>Cancel Consultation</Text></TouchableOpacity>}
 
                   {['completed', 'cancelled'].includes(selectedConsultation.status) ? <View style={styles.lockedNotice}><Ionicons name="lock-closed-outline" size={18} color="#475569" /><Text style={styles.lockedNoticeText}>Completed and cancelled consultations are read-only.</Text></View> : <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={saveConsultationDetails} disabled={saving}>{saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveButtonText}>Save Notes</Text>}</TouchableOpacity>}
                 </>
@@ -372,6 +399,7 @@ export default function HistoryScreen() {
           </View>
         </View>
       </Modal>
+      <ActionDialog visible={Boolean(pendingAction)} title={pendingAction === 'cancel' ? 'Cancel consultation?' : 'Complete consultation?'} message={pendingAction === 'cancel' ? 'This action cannot be undone. Enter the cancellation reason.' : pendingAction === 'pause' ? 'Save your notes, complete this session and pause the queue? Your availability will become Unavailable.' : 'Save your notes, complete this session and call the next accepted student?'} confirmLabel="Confirm" destructive={pendingAction === 'cancel'} busy={saving} confirmDisabled={pendingAction === 'cancel' && !cancelReason.trim()} onConfirm={completeConsultation} onCancel={() => { if (!saving) setPendingAction(null); }}>{pendingAction === 'cancel' && <TextInput accessibilityLabel="Cancellation reason" value={cancelReason} onChangeText={setCancelReason} style={styles.textArea} placeholder="Reason for cancellation" maxLength={2000} />}</ActionDialog>
     </SafeAreaView>
   );
 }
