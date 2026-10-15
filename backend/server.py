@@ -157,6 +157,11 @@ class AuthSession(Base):
     faculty_id: Mapped[str] = mapped_column(String(36), index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime)
 
+class RetiredFacultyID(Base):
+    __tablename__ = 'retired_faculty_ids'
+    school_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    retired_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
 class AuditLog(Base):
     __tablename__ = 'audit_log'
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=id_value)
@@ -362,7 +367,7 @@ async def throttle(request: Request, call_next):
     path = request.url.path
     if request.method in {'POST', 'DELETE'} and (path.startswith('/api/auth/') or path.startswith('/api/admin/') or path.startswith('/api/kiosk/')):
         peer = request.client.host if request.client else 'unknown'
-        bucket = 'login' if path == '/api/auth/login' else 'signup' if path == '/api/auth/signup' else 'sensitive' if (path.endswith('/reset-password') or (request.method == 'DELETE' and path.startswith('/api/admin/faculty/'))) else 'write'
+        bucket = 'login' if path == '/api/auth/login' else 'signup' if path == '/api/auth/signup' else 'sensitive' if (path.endswith('/reset-password') or (request.method == 'DELETE' and path.startswith(('/api/admin/faculty/', '/api/admin/archives/')))) else 'write'
         key = (peer, bucket)
         stamp = time.monotonic()
         limit, window = (10, 60) if bucket == 'login' else (5, 3600) if bucket == 'signup' else (5, 300) if bucket == 'sensitive' else (120, 60)
@@ -510,7 +515,7 @@ async def signup(payload: FacultySignup, db: AsyncSession = Depends(session)):
     if payload.privacy_version != '1': raise HTTPException(422, 'Please refresh and read the current Privacy Notice')
     if len(payload.password) < 8: raise HTTPException(422, "Password must be at least 8 characters")
     if "@" not in payload.email: raise HTTPException(422, "Enter a valid email address")
-    if await db.scalar(select(Faculty).where(Faculty.school_id == school_id)):
+    if await db.scalar(select(Faculty).where(Faculty.school_id == school_id)) or await db.get(RetiredFacultyID, school_id):
         raise HTTPException(409, "A faculty account with this School ID already exists")
     faculty = Faculty(
         school_id=school_id,
@@ -604,6 +609,7 @@ async def admin_faculty(db: AsyncSession = Depends(session), _: Faculty = Depend
     for row in rows:
         item = serialize(row, True)
         item.pop('profile_image', None)
+        item['archived_record_count'] = await db.scalar(select(func.count()).select_from(ConsultationRecord).where(ConsultationRecord.faculty_school_id == row.school_id)) or 0
         item['total_consultations'] = await db.scalar(select(func.count()).select_from(ConsultationRecord).where(and_(ConsultationRecord.faculty_school_id == row.school_id, ConsultationRecord.status == 'completed'))) or 0
         output.append(item)
     return output
@@ -728,6 +734,34 @@ async def delete_faculty_account(school_id: str, payload: AdminPasswordConfirmat
     await connections.send("account_deleted", {"message": "Your faculty account has been removed by an administrator."}, faculty_id=school_id)
     await connections.send("availability_changed", {"faculty_id": school_id, "status": "unavailable", "accepting_consultations": False})
     return {'message': 'Faculty account and consultation history deleted' if payload.delete_history else 'Faculty account archived; consultation records retained'}
+
+async def purge_archive(school_id, payload, db, admin, remove_faculty):
+    if not pwd_context.verify(payload.admin_password, admin.password_hash):
+        raise HTTPException(403, 'Administrator password is incorrect')
+    account = await db.scalar(select(Faculty).where(Faculty.school_id == school_id).with_for_update())
+    if not account: raise HTTPException(404, 'Archived faculty not found')
+    if not account.is_deleted or account.role == 'admin':
+        raise HTTPException(409, 'Only an already archived faculty account can be cleaned up here')
+    result = await db.execute(delete(ConsultationRecord).where(ConsultationRecord.faculty_school_id == school_id))
+    deleted_count = result.rowcount
+    await db.execute(delete(SubmissionReceipt).where(SubmissionReceipt.result['faculty_school_id'].as_string() == school_id))
+    if remove_faculty:
+        if not await db.get(RetiredFacultyID, school_id): db.add(RetiredFacultyID(school_id=school_id))
+        await db.execute(delete(AuthSession).where(AuthSession.faculty_id == account.id))
+        for model in (NotificationRecord, ConsultationRequestRecord, QueueRecord, QueueCounter):
+            await db.execute(delete(model).where(model.faculty_school_id == school_id))
+        await db.delete(account)
+    audit(db, admin, 'archived_faculty_removed' if remove_faculty else 'archived_records_deleted', school_id)
+    await db.commit()
+    return {'message': 'Archived faculty and remaining consultation records removed' if remove_faculty else 'Archived consultation records removed; faculty archive retained', 'deleted_records': deleted_count}
+
+@api.delete('/admin/archives/{school_id}/records')
+async def delete_archive_records(school_id: str, payload: AdminPasswordConfirmation, db: AsyncSession = Depends(session), admin: Faculty = Depends(current_admin)):
+    return await purge_archive(school_id, payload, db, admin, False)
+
+@api.delete('/admin/archives/{school_id}')
+async def delete_archive_faculty(school_id: str, payload: AdminPasswordConfirmation, db: AsyncSession = Depends(session), admin: Faculty = Depends(current_admin)):
+    return await purge_archive(school_id, payload, db, admin, True)
 
 @api.get("/kiosk/faculty")
 async def kiosk_faculty(db: AsyncSession = Depends(session)):

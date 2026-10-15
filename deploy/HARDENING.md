@@ -20,6 +20,13 @@ Existing backups are not rewritten; they age out according to backup retention.
 Archived faculty history remains accessible through Admin/IT Chair faculty records.
 No production faculty history was deleted as part of installing this update.
 
+The admin's Archived Faculty section allows later cleanup: delete consultation
+records/notes but retain the faculty archive, or remove the archived faculty entry
+and all remaining consultation records. Both actions require admin reauthentication
+and confirmation. Removed entries retain only a reserved School ID, not their
+profile, so signup cannot reuse a previously deleted identity. Audit records and
+existing backups remain subject to their separate retention rules.
+
 ## Student access and identity
 
 Consultation submission requires no student account. The Pi kiosk can look up

@@ -104,14 +104,38 @@ async def main():
         await request('POST', f'/consultations/{future_id}/start', token=faculty, status=409)
         await request('POST', f'/consultations/{future_id}/cancel', token=faculty, json={'reason': 'Student unavailable'})
         await request('POST', f'/consultations/{future_id}/start', token=faculty, status=409)
+        app._attempts.clear()
+        await request('DELETE', '/admin/archives/FAC_TEST/records', token=faculty, status=403, json={'admin_password': 'AdminTest123!'})
+        await request('DELETE', '/admin/archives/FAC_TEST/records', token=admin, status=409, json={'admin_password': 'AdminTest123!'})
+        app._attempts.clear()
+        async with app.SessionLocal() as db:
+            db.add(app.ConsultationRecord(faculty_school_id='NEW_TEST', student_id='OTHER_STUDENT', student_name='Other Student', topic='Unrelated history', date=app.local_today(), time='Walk-in', status='completed', notes='Preserve until explicitly removed'))
+            await db.commit()
         await request('DELETE', '/admin/faculty/FAC_TEST', token=admin, json={'admin_password': 'AdminTest123!'})
         await request('GET', '/faculty/profile', token=faculty, status=401)
         archive = await request('GET', '/admin/faculty', token=admin)
         assert next(person for person in archive if person['school_id'] == 'FAC_TEST')['is_deleted']
         assert len(await request('GET', '/admin/faculty/FAC_TEST/consultations', token=admin)) == 3
         await request('POST', '/admin/faculty/FAC_TEST/reject', token=admin, status=409)
+        await request('DELETE', '/admin/archives/FAC_TEST/records', token=admin, status=403, json={'admin_password': 'Incorrect123!'})
+        assert len(await request('GET', '/admin/faculty/FAC_TEST/consultations', token=admin)) == 3
+        await request('DELETE', '/admin/archives/FAC_TEST/records', token=admin, json={'admin_password': 'AdminTest123!'})
+        assert await request('GET', '/admin/faculty/FAC_TEST/consultations', token=admin) == []
+        archived_list = await request('GET', '/admin/faculty', token=admin)
+        assert next(person for person in archived_list if person['school_id'] == 'FAC_TEST')['full_name'] == 'Faculty Test'
         await request('DELETE', '/admin/faculty/FAC_TEST', token=admin, json={'admin_password': 'AdminTest123!', 'delete_history': True})
         assert await request('GET', '/admin/faculty/FAC_TEST/consultations', token=admin) == []
+        app._attempts.clear()
+        await request('DELETE', '/admin/archives/FAC_TEST', token=admin, json={'admin_password': 'AdminTest123!'})
+        assert not any(person['school_id'] == 'FAC_TEST' for person in await request('GET', '/admin/faculty', token=admin))
+        assert len(await request('GET', '/admin/faculty/NEW_TEST/consultations', token=admin)) == 1
+        await request('DELETE', '/admin/faculty/NEW_TEST', token=admin, json={'admin_password': 'AdminTest123!'})
+        removed = await request('DELETE', '/admin/archives/NEW_TEST', token=admin, json={'admin_password': 'AdminTest123!'})
+        assert removed['deleted_records'] == 1
+        assert await request('GET', '/admin/faculty/NEW_TEST/consultations', token=admin) == []
+        async with app.SessionLocal() as db:
+            assert await db.get(app.RetiredFacultyID, 'FAC_TEST') is not None
+            assert await db.get(app.RetiredFacultyID, 'NEW_TEST') is not None
         registration['school_id'] = 'FAC_TEST'
         app._attempts.clear()
         await request('POST', '/auth/signup', status=409, json=registration)

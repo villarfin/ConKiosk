@@ -387,6 +387,20 @@ student roster entries or audit records and does not rewrite existing backups.
 History deletion cannot be undone in the app; authorized backup restoration is a
 separate operation that can affect other data and must be planned accordingly.
 
+The administrator's **Archived Faculty** section also provides cleanup after an
+account has already been deleted:
+
+- **View archived records** opens the retained consultation history.
+- **Delete archived records** permanently deletes that faculty's consultation
+  records/notes while keeping the archived faculty entry.
+- **Remove archived faculty** permanently removes the archived faculty entry and
+  any remaining consultation records. A minimal reserved School ID remains to
+  prevent reuse; the profile is no longer listed.
+
+Both cleanup actions require explicit confirmation and the administrator's current
+password. They apply only to already archived accounts, are recorded in the audit
+log, and do not delete shared student records or existing backups.
+
 ### Password recovery
 
 Administrators can reset a faculty password from its management card after entering
@@ -541,6 +555,7 @@ Development route/schema details are available at `/docs` on the API server.
 | Administrator/IT Chair reads | `GET /admin/summary`, `/admin/faculty`, `/admin/students`, `/admin/faculty/{school_id}/consultations`, `/admin/consultations/today` |
 | Administrator writes | Faculty approval/rejection, profile updates, IT Chair assignment/removal, password reset, and account deletion under `/admin` |
 | Administrator audit | `GET /admin/audit` |
+| Administrator archive cleanup | `DELETE /admin/archives/{school_id}/records` to delete retained records, or `DELETE /admin/archives/{school_id}` to remove the archive and remaining records; both require `admin_password`. |
 
 Student, consultation, notification, and audit list endpoints supporting pagination
 use `limit` and `offset`, with a default page of 100 and maximum limit of 200.
