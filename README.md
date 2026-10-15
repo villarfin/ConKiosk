@@ -1,560 +1,628 @@
-# ConKiosk – Smart Faculty Consultation Management System
+# ConKiosk — Faculty Consultation Management System
 
-A complete 4-component consultation management system for universities, built as a capstone project.
+ConKiosk is a capstone project for managing student–faculty consultations through a
+student kiosk, a faculty web/mobile application, an administrator interface, and a
+TV queue display. A Raspberry Pi 5 hosts the API and database on a local network.
+Normal consultation operations do not require an internet connection.
 
-![Status](https://img.shields.io/badge/status-active-success)
-![Backend](https://img.shields.io/badge/backend-FastAPI-009688)
-![Frontend](https://img.shields.io/badge/frontend-Expo%20%2F%20React%20Native-000020)
-![Database](https://img.shields.io/badge/database-PostgreSQL-4169E1)
+This README documents the implemented software and its installation, operation,
+testing, and handover. The capstone manuscript remains the source for the approved
+research title, researchers, institution, adviser, methodology, and evaluation
+results. No user-study results or performance guarantees are implied here.
 
----
+## Contents
 
-## Table of Contents
+- [Purpose and scope](#purpose-and-scope)
+- [Architecture and technology](#architecture-and-technology)
+- [Users and access](#users-and-access)
+- [Consultation workflow](#consultation-workflow)
+- [Requirements](#requirements)
+- [Development setup](#development-setup)
+- [Raspberry Pi deployment](#raspberry-pi-deployment)
+- [Account management and security](#account-management-and-security)
+- [Student records and privacy](#student-records-and-privacy)
+- [Backups and recovery](#backups-and-recovery)
+- [Testing and capstone demonstration](#testing-and-capstone-demonstration)
+- [API overview](#api-overview)
+- [Project structure](#project-structure)
+- [Troubleshooting](#troubleshooting)
+- [Limitations and handover](#limitations-and-handover)
 
-1. [What is ConKiosk?](#what-is-conkiosk)
-2. [System Components](#system-components)
-3. [Tech Stack](#tech-stack)
-4. [Quick Start (Development)](#quick-start-development)
-5. [Roles, Registration, and Privacy](#roles-registration-and-privacy)
-6. [Offline LAN Access](#offline-lan-access)
-7. [Test Credentials](#test-credentials)
-8. [What Each File Does](#what-each-file-does)
-9. [Customization Guide](#customization-guide) ← **edit faculty, students, colors, cards, images**
-10. [Raspberry Pi 5 Deployment](#raspberry-pi-5-deployment)
-11. [Troubleshooting](#troubleshooting)
+## Purpose and scope
 
----
+The project supports these operational objectives:
 
-## What is ConKiosk?
+- Let students identify themselves through a USB QR scanner or manual entry and
+  submit individual/group consultation requests without creating an account.
+- Give faculty a way to accept, decline, or reschedule requests, maintain
+  availability, and record consultation notes/feedback.
+- Display faculty availability, the current queue number, and upcoming numbers
+  on a TV without requiring scrolling.
+- Give administrators account controls and the IT Chair authorized read-only
+  access to institutional records.
+- Retain consultation history locally and support offline LAN deployment.
 
-ConKiosk digitizes faculty consultations. Instead of manual queues and uncertainty:
+The implemented scope covers consultations, queues, accounts, notifications, and
+records. It does not include student chat, file/audio exchange, payment processing,
+or cloud push/email notifications. Profile pictures are supported.
 
-- Students walk up to a **kiosk** and request a consultation (QR scan or manual entry).
-- Faculty see requests instantly on their **mobile app** and accept/decline/reschedule.
-- A **TV display** outside the office shows live queue numbers and faculty availability.
-- Everything syncs in real time via a **Raspberry Pi 5** server.
+## Architecture and technology
 
----
+```text
+Faculty phones / laptop              Dedicated router
+  Web app or Expo Go  <----------->  e.g. 192.168.0.1
+                                           |
+                                  Raspberry Pi 5
+                                  e.g. 192.168.0.2
+                                           |
+                              Nginx: HTTP 80 / HTTPS 443
+                                           |
+                              FastAPI + WebSocket API
+                                  127.0.0.1:8001
+                                           |
+                                    PostgreSQL
+                                  127.0.0.1:5432
 
-## System Components
-
-| # | Component | Role | Where It Runs |
-|---|-----------|------|---------------|
-| 1 | **Faculty Mobile App** | Login, view/accept/decline requests, manage availability, history | Faculty phone (Expo Go or built APK/IPA) |
-| 2 | **Student Kiosk** | Public touchscreen for students to request consultations | Chromium on RPi's touchscreen |
-| 3 | **TV Queue Display** | Real-time board showing all faculty statuses and queue numbers | Chromium on monitor connected to RPi |
-| 4 | **Raspberry Pi 5 Server** | FastAPI backend + PostgreSQL + WebSockets | The RPi itself |
-
-All four components live in **one codebase** in this repo.
-
-## Roles, Registration, and Privacy
-
-| Role | Access |
-|---|---|
-| **Faculty** | Manages availability, consultation requests, consultation notes/feedback, profile, and history. |
-| **IT Chair** | Read-only faculty, student, and consultation records. Consultation detail includes student information and the faculty-authored Notes/feedback. |
-| **Administrator** | Manages registrations, faculty profiles and availability, administrator credentials, IT Chair assignment, and faculty accounts. |
-
-New faculty accounts are created in a pending state and cannot sign in until an
-Administrator approves them. Registration requires password confirmation and a Privacy
-Notice acknowledgment. Before production use, the school must have its Data Protection
-Officer review the notice and replace its official institution, retention, and DPO-contact details.
-
-Administrative safeguards: approving/rejecting registrations and IT Chair transfers
-require confirmation; faculty deletion additionally requires the current administrator
-password, verified by the API. Deleting an account immediately revokes that faculty
-member's active app session.
-
-## Offline LAN Access
-
-Normal operation does not require internet access. Connect the Raspberry Pi, faculty
-phones, kiosk, and TV to the same dedicated router. For a Pi at `192.168.0.2`:
-
-| Interface | LAN address |
-|---|---|
-| Faculty web app | `http://192.168.0.2/login` |
-| Student kiosk | `http://192.168.0.2/kiosk` |
-| TV queue display | `http://192.168.0.2/tv` |
-| Health check | `http://192.168.0.2/api/health` |
-
-For Expo Go development, use `EXPO_PUBLIC_API_URL=http://192.168.0.2/api` (replace
-the IP with the Pi's actual LAN address). `yarn start:lan` prefers Ethernet when both
-Ethernet and Wi-Fi are connected and uses the Nginx API endpoint by default. See
-[LAN_OFFLINE_DEPLOYMENT.md](LAN_OFFLINE_DEPLOYMENT.md) for full deployment and testing.
-
----
-
-## Tech Stack
-
-- **Backend:** Python 3.11+, FastAPI, PostgreSQL, native WebSockets, JWT auth (bcrypt)
-- **Frontend:** Expo (React Native) + TypeScript + Expo Router
-- **Real-time:** Native WebSockets with automatic client reconnection
-- **QR Scanning:** USB HID keyboard scanners (no special driver)
-
----
-
-## Quick Start (Development)
-
-### Prerequisites
-- Node.js 18+ and `yarn`
-- Python 3.11+
-- PostgreSQL (local install or Docker)
-- Expo Go app on your phone (for mobile testing)
-
-### Start the whole system
-
-Run these services in separate terminals from the project folder:
-
-```bash
-# Terminal 1: start PostgreSQL (Linux systems using systemd)
-sudo systemctl start postgresql
-
-# Terminal 2: start the FastAPI API and WebSocket server
-cd backend
-source venv/bin/activate
-uvicorn server:socket_app --host 0.0.0.0 --port 8001 --reload
-
-# Terminal 3: detects the Pi's current LAN IP, then starts the frontend
-cd frontend
-yarn start:lan
+Pi touchscreen: Chromium /kiosk
+Pi HDMI2 TV:    separate Chromium profile /tv
 ```
 
-When Expo is ready, open `http://localhost:8081/kiosk` for the student kiosk and
-`http://localhost:8081/tv` for the TV queue display. Scan the Expo QR code with
-Expo Go for the faculty mobile app. `yarn start:lan` detects the Raspberry Pi's
-current Wi-Fi/Ethernet address every time it starts, so changing Wi-Fi does not
-require editing `frontend/.env`. Keep the phone and Raspberry Pi on the same network.
+| Layer | Implementation |
+|---|---|
+| Web/mobile UI | Expo SDK 54, React Native, TypeScript, Expo Router |
+| API | Python, FastAPI, SQLAlchemy async, Uvicorn |
+| Database | PostgreSQL |
+| Authentication | bcrypt password hashes, JWTs backed by revocable sessions |
+| Live updates | Native WebSockets with reconnect and polling fallbacks |
+| Pi deployment | Raspberry Pi OS 64-bit, Nginx, systemd, Chromium/Labwc |
+| Student ID input | USB HID keyboard QR scanner or manual entry |
 
-### 1. Clone the repo
+This repository uses **FastAPI and PostgreSQL**, not Laravel, PHP, or MariaDB.
+Phones communicate with the API; they never connect directly to PostgreSQL.
+
+The router address is not the server address. The example router is
+`192.168.0.1`; the Pi is `192.168.0.2`. Give the Pi a DHCP reservation or a suitable
+static address outside the router's dynamic pool. Disable AP/client isolation.
+
+## Users and access
+
+| User | Access |
+|---|---|
+| Student | Uses the public kiosk without logging in; submits a topic and student details, then receives a queue number. |
+| Faculty | Manages own availability, requests, consultations, notes, profile, and notifications. |
+| IT Chair | Has normal faculty functions plus read-only faculty, student, and consultation records. Cannot approve accounts, transfer roles, or delete accounts. |
+| Administrator | Approves/rejects registrations, manages faculty, transfers IT Chair access, resets passwords, selects deletion options, and views audit records. |
+
+New faculty registrations remain pending until approved. Approval/rejection and
+role transfers require confirmation. Destructive account operations additionally
+require the current administrator password, checked by the backend.
+
+## Consultation workflow
+
+1. A student selects a faculty member accepting consultations at `/kiosk`.
+2. The student scans/enters an ID, completes the required information, selects an
+   individual or group consultation, and submits a topic.
+3. The kiosk displays a queue ticket. Faculty receive the request.
+4. Accepting the first eligible request starts its consultation and sets faculty
+   availability to Busy. Further accepted students remain Waiting in queue order.
+5. Only one session can be Ongoing per faculty. A pending request at the front
+   must be processed before a later student can start.
+6. Faculty enter notes and choose Complete & Advance Queue, Complete & Pause
+   Queue, or cancellation with a reason. Completion saves notes in the same action.
+7. Advancement calls the next accepted student. Pausing sets availability to
+   Unavailable; faculty can later start the first waiting consultation explicitly.
+8. Completed and Cancelled records are read-only in the UI and API.
+
+Accepted queue entries use the stored `scheduled` status but display as Waiting
+in faculty History. Future appointments display as Scheduled and cannot start
+before their date. Rescheduling creates a future appointment and removes the
+original ticket from the active queue. There is no automatic appointment reminder.
+
+Queue numbers are per faculty, so two offices can each have `A001`. Identify a
+ticket using its faculty/office as well as its number. An empty queue resets its
+numbering; consultation history retains its own ticket/group snapshot.
+
+The TV uses navy blue, gold, and white, fits all faculty cards into its available
+area, and shows large queue numbers in a separate full-height right panel. Queue
+pages rotate when needed. New calls trigger a chime; an existing browser may need
+one click on Sound to authorize playback. A disconnected display marks stale data.
+
+## Requirements
+
+### Development
+
+- Node.js **20.19.4 or newer**, matching the installed React Native dependency.
+- Python 3.11+ with virtual-environment support.
+- PostgreSQL, Git, and npm; use the committed npm lockfile with `npm ci`.
+- Expo Go compatible with the project's SDK for native development testing.
+- Phone and development server on the same LAN for Expo Go.
+
+### Deployment hardware
+
+- Raspberry Pi 5 running Raspberry Pi OS 64-bit with sufficient storage.
+- Dedicated router and Ethernet cable/Wi-Fi connectivity.
+- Touchscreen and optional USB HID QR scanner for the kiosk.
+- TV connected to the same Pi's second HDMI output for the current dual-display setup.
+- Reliable power; a UPS and an external backup device are recommended for handover.
+
+Installing dependencies, downloading Expo Go, OS updates, and cloud builds may
+require internet. After installation, the Nginx-served web app, API, and database
+operate locally. Native Expo Go must load its bundle from a running LAN Metro
+server; it is not the production web server. Icon fonts are bundled locally.
+
+## Development setup
+
+### 1. Obtain the project and database
+
 ```bash
-git clone https://github.com/<your-username>/ConKiosk.git
+git clone https://github.com/villarfin/ConKiosk.git
 cd ConKiosk
+sudo systemctl start postgresql
+sudo -u postgres createuser --pwprompt conkiosk
+sudo -u postgres createdb --owner=conkiosk conkiosk
 ```
 
-### 2. Backend setup
+The PostgreSQL commands are for a new Linux installation. If the role/database
+already exist, keep them and their credentials. Do not recreate or reset real data.
+
+### 2. Configure the backend
+
 ```bash
 cd backend
 python3 -m venv venv
-source venv/bin/activate       # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-
-# Create .env from the safe template, then set PostgreSQL credentials and a random JWT secret.
+source venv/bin/activate
+python -m pip install -r requirements.txt
 cp .env.example .env
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
 
-# Start the server
+Copy the template only on first setup; do not overwrite an existing `.env`.
+Restrict its permissions with `chmod 600 backend/.env` from the repository root.
+Edit `backend/.env`; use the generated value as the JWT secret. URL-encode special
+characters in database credentials. The following values illustrate a development
+API directly accessible on the LAN:
+
+```dotenv
+DATABASE_URL=postgresql+asyncpg://conkiosk:YOUR_URL_ENCODED_PASSWORD@127.0.0.1:5432/conkiosk
+JWT_SECRET_KEY=YOUR_GENERATED_SECRET
+ENVIRONMENT=development
+ALLOW_SEED_DATA=false
+LAN_ORIGIN=http://192.168.0.2
+CORS_ORIGINS=http://192.168.0.2:8081,http://localhost:8081
+ADMIN_SCHOOL_ID=YOUR_ADMINISTRATOR_ID
+ADMIN_PASSWORD=YOUR_PRIVATE_INITIAL_ADMINISTRATOR_PASSWORD
+ADMIN_NAME=ConKiosk Administrator
+KIOSK_ALLOWED_IPS=127.0.0.1,::1
+REQUIRE_STUDENT_ROSTER=false
+PRIVACY_INSTITUTION=
+PRIVACY_CONTACT=
+PRIVACY_RETENTION=
+```
+
+Set real private administrator credentials before first startup. Startup creates
+the configured administrator if absent; faculty register through the UI. There
+is no published production password. The bootstrap password does not reset an
+existing account. It may be removed from the environment after initial creation;
+use the password-management UI or local recovery command thereafter.
+
+Start the development backend:
+
+```bash
 uvicorn server:socket_app --host 0.0.0.0 --port 8001 --reload
 ```
 
-### 3. Seed demo data only (development only)
+Binding to all interfaces is for trusted-LAN development. Production binds Uvicorn
+to loopback behind Nginx. First startup creates tables; existing installations also
+receive the compatibility schema updates implemented in `backend/server.py`.
+
+### 3. Configure and start Expo
+
+In another terminal from the repository root:
+
 ```bash
-echo ALLOW_SEED_DATA=true >> .env
-curl -X POST http://localhost:8001/api/seed
+cd frontend
+npm ci
+cp .env.example .env
 ```
-This destructive endpoint creates demo data. Never enable it or run it against real data.
 
-### 4. Frontend setup
+For the direct development API above, set:
+
+```dotenv
+EXPO_PUBLIC_API_URL=http://192.168.0.2:8001/api
+```
+
+Replace the IP with the development API machine's actual LAN address. Add that
+machine's Metro browser origin to backend CORS configuration when using Expo web.
+
 ```bash
-cd ../frontend
-yarn install
-
-# Create .env
-cat > .env <<EOF
-EXPO_PUBLIC_API_URL=http://localhost:8001/api
-EOF
-
-# Start Expo
-yarn start
+npx expo start --lan
 ```
 
-### 5. Access the three interfaces
-- **Faculty Mobile App**: Scan the QR code shown in the terminal with Expo Go
-- **Student Kiosk**: Open `http://localhost:8081/kiosk` in browser
-- **TV Display**: Open `http://localhost:8081/tv` in browser
+Scan the terminal QR with Expo Go. Browser development routes are
+`http://localhost:8081/kiosk` and `http://localhost:8081/tv` on the development
+machine. A phone must use that machine's LAN address instead of localhost.
 
-### 6. Safe pre-deployment pilot
+When developing against the deployed Pi through Nginx, use
+`EXPO_PUBLIC_API_URL=http://192.168.0.2/api`. The optional `npm run start:lan`
+launcher selects a local private IP and overrides the API URL for that process;
+it is intended for a machine hosting the API/Nginx. For a laptop using a separate
+Pi server, use `npx expo start --lan` to preserve the configured Pi API URL.
 
-Do not test using the production database. Create a separate PostgreSQL database and
-use `backend/.env.test.example` as its configuration template. The integration suite
-intentionally requires `RUN_INTEGRATION_TESTS=true` before it can reset test data.
+### Demo data
 
-For phone testing, set `EXPO_PUBLIC_API_URL` to the server's LAN API URL (not
-`localhost`), run `yarn start:lan`, and open the app in Expo Go on phones connected to
-the same Wi-Fi. When the pilot passes, build an installable Android APK with
-`npx eas-cli build --profile preview --platform android`; `preview` is for internal
-faculty distribution, while `production` produces a Play Store AAB.
+`POST /api/seed` is destructive and permitted only when the backend is in
+development/test mode with `ALLOW_SEED_DATA=true`. Never enable it on a real
+installation. Use only a disposable database; see [backend tests](backend/tests/README.md).
 
----
+Seeded demo faculty IDs `FAC2024001`–`FAC2024006` use `password123` only in that
+disposable dataset. These are not deployment credentials. Manage real faculty
+through registration/administration and students through the kiosk or roster import.
 
-## Test Credentials
+## Raspberry Pi deployment
 
-Faculty accounts (all use password `password123`):
-| School ID | Name | Department |
-|-----------|------|------------|
-| FAC2024001 | Dr. Maria Santos | Computer Science |
-| FAC2024002 | Prof. Juan Reyes | Information Technology |
-| FAC2024003 | Dr. Elena Cruz | Mathematics |
-| FAC2024004 | Prof. Antonio Villar | Engineering |
-| FAC2024005 | Dr. Sofia Mendoza | Business Administration |
-| FAC2024006 | Prof. Roberto Lim | Computer Science |
+The supplied service paths assume `/home/conkiosk/ConKiosk` and Linux user
+`conkiosk`. Adjust templates before installing on another account/path.
 
-Sample student IDs for QR testing: `STU2024101` to `STU2024108`.
+1. Install PostgreSQL, Python/venv, Nginx, Chromium, and the desktop display tools
+   required by the Pi's Labwc configuration. Install project dependencies as above.
+2. Configure `backend/.env` with `ENVIRONMENT=production`, `ALLOW_SEED_DATA=false`,
+   private credentials, the Pi LAN origin, and explicitly allowed browser origins.
+3. Build the web frontend with the Nginx API URL:
 
----
+   ```bash
+   cd /home/conkiosk/ConKiosk/frontend
+   npm ci
+   npx expo export --platform web --output-dir dist
+   ```
 
-## What Each File Does
+4. Install the API service and HTTP site. Review existing Nginx sites first; only
+   one site should own the default listener. Do not overwrite unrelated sites.
 
-```
-ConKiosk/
-├── backend/
-│   ├── server.py              ← ALL backend logic, endpoints, seed data
-│   ├── requirements.txt       ← Python dependencies
-│   └── .env                   ← PostgreSQL URL + JWT secret (do NOT commit)
-│
-├── frontend/
-│   ├── app/
-│   │   ├── _layout.tsx        ← Root layout, wraps app in AuthProvider
-│   │   ├── index.tsx          ← Landing page, redirects to /login or /dashboard
-│   │   ├── login.tsx          ← Faculty login screen
-│   │   ├── signup.tsx         ← Faculty registration + privacy acknowledgment
-│   │   ├── admin.tsx          ← Administrator controls and protected actions
-│   │   ├── admin-account.tsx  ← Administrator profile/password management
-│   │   ├── tv.tsx             ← TV queue display  (compact cards)
-│   │   │
-│   │   ├── (tabs)/            ← FACULTY MOBILE APP (5 bottom tabs)
-│   │   │   ├── _layout.tsx    ← Bottom nav config
-│   │   │   ├── dashboard.tsx  ← Home tab (stats, availability toggle)
-│   │   │   ├── requests.tsx   ← Consultation requests inbox
-│   │   │   ├── history.tsx    ← Consultation history with search/filter
-│   │   │   ├── notifications.tsx
-│   │   │   └── profile.tsx    ← Profile edit, change password, logout
-│   │   │   └── it-chair.tsx   ← Read-only institutional consultation records
-│   │   │
-│   │   └── kiosk/             ← STUDENT KIOSK (touchscreen)
-│   │       ├── _layout.tsx    ← Stack navigator for kiosk flow
-│   │       ├── index.tsx      ← Faculty grid landing page
-│   │       ├── identify.tsx   ← Student ID entry (QR + manual)
-│   │       ├── request.tsx    ← Topic entry & submission
-│   │       └── confirmation.tsx  ← Queue number display
-│   │
-│   ├── src/
-│   │   ├── contexts/
-│   │   │   └── AuthContext.tsx  ← Login/logout, JWT, WebSocket client
-│   │   └── utils/
-│   │       ├── api.ts         ← HTTP client with auth headers
-│   │       └── storage/       ← Wrapper around SecureStore + AsyncStorage
-│   │
-│   ├── .env                   ← EXPO_PUBLIC_API_URL (do NOT commit)
-│   └── package.json
-│
-├── RPI5_DEPLOYMENT.md         ← Complete RPi 5 deployment guide
-└── README.md                  ← This file
-```
+   ```bash
+   cd /home/conkiosk/ConKiosk
+   sudo install -m 644 deploy/conkiosk-backend.service /etc/systemd/system/conkiosk.service
+   sudo install -d /var/www/conkiosk
+   sudo rsync -a frontend/dist/ /var/www/conkiosk/
+   sudo install -m 644 deploy/conkiosk.nginx.conf /etc/nginx/sites-enabled/conkiosk
+   sudo nginx -t
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now postgresql conkiosk.service nginx
+   sudo systemctl reload nginx
+   ```
 
----
+5. Install and verify the backup service before using real records; see the next
+   sections and [deployment/security notes](deploy/HARDENING.md).
+6. Keep PostgreSQL/Uvicorn loopback-only. Clients need HTTP/HTTPS, not database
+   port 5432 or backend port 8001. Port 8081 is only needed for Metro development.
+7. Verify the end-to-end workflow with WAN disconnected before handover.
 
-## Customization Guide
+| Interface | Example address |
+|---|---|
+| Faculty sign-in | `http://192.168.0.2/login` |
+| Student kiosk; no student login | `http://192.168.0.2/kiosk` |
+| TV display | `http://192.168.0.2/tv` |
+| API/database health | `http://192.168.0.2/api/health` |
+| Additional HTTPS listener, when installed | `https://192.168.0.2` |
 
-### 🎨 1. Change the Color Theme
+Browser deployments use the page's origin for API calls. Native Expo clients use
+`EXPO_PUBLIC_API_URL`. Never include database passwords or JWT signing secrets in
+any `EXPO_PUBLIC_*` value.
 
-**Primary blue** appears everywhere. To rebrand, find and replace this hex:
-- **Current color:** `#2196F3` (Material Blue)
-- Search all files under `/frontend/app/` and `/frontend/src/` and replace with your color.
+### Boot and two displays
 
-**Status colors** (in every screen file's `getStatusColor` function):
-```ts
-case 'available': return '#4CAF50';    // Green
-case 'busy':      return '#FF9800';    // Orange
-case 'unavailable': return '#F44336';  // Red
-```
+The backend service waits for local PostgreSQL, not Wi-Fi or internet. It can start
+before the router is connected; clients gain access once the Pi has its LAN address.
+Production kiosk/TV browsers do not need Metro.
 
-**TV Display background** (dark theme):
-- File: `frontend/app/tv.tsx`
-- Change `backgroundColor: '#0F172A'` (main bg) or `'#1E293B'` (cards)
+`deploy/conkiosk-dual-display.sh` opens independent Chromium profiles for the
+touchscreen (`HDMI-A-1`) and TV (`HDMI-A-2`). Its desktop entry is installed in the
+user's autostart directory; Labwc placement rules select the physical displays.
+The current placement template contains installation-specific screen dimensions,
+positions, and touch-device name: inspect `wlr-randr` and adapt it to the actual
+hardware. Merge rules into an existing Labwc configuration rather than replacing
+unrelated desktop preferences.
 
-### 👨‍🏫 2. Add / Edit / Remove Faculty
+The graphical desktop must log in automatically for desktop autostart to run. The
+launcher waits up to approximately two minutes for API health and both outputs,
+then exits if either display is missing. Power on/select the TV's input before
+boot; if necessary, rerun the launcher after connecting both displays.
 
-Edit the seed function in `backend/server.py`:
+For the `conkiosk` desktop user, install the supplied launcher/entry from the
+repository root:
 
-```python
-# Find the section starting with:
-faculty_list = [
-    {
-        "school_id": "FAC2024001",
-        "password_hash": get_password_hash("password123"),
-        "full_name": "Dr. Maria Santos",
-        "department": "Computer Science",
-        "office_location": "Room 301, Science Building",
-        "email": "maria.santos@university.edu",
-        "availability_status": "available",   # available | busy | unavailable
-        "office_hours": "Mon-Fri 9:00 AM - 5:00 PM"
-    },
-    # ADD MORE FACULTY HERE ↓
-    {
-        "school_id": "FAC2024007",
-        "password_hash": get_password_hash("your-chosen-password"),
-        "full_name": "Dr. New Professor",
-        "department": "Physics",
-        "office_location": "Room 205, Science Building",
-        "email": "newprof@university.edu",
-        "availability_status": "available",
-        "office_hours": "Mon-Wed-Fri 10:00 AM - 4:00 PM"
-    },
-]
-```
-
-After editing, re-seed:
 ```bash
-curl -X POST http://localhost:8001/api/seed
+install -d "$HOME/.local/bin" "$HOME/.config/autostart"
+install -m 755 deploy/conkiosk-dual-display.sh "$HOME/.local/bin/conkiosk-dual-display"
+install -m 644 deploy/conkiosk-dual-display.desktop "$HOME/.config/autostart/conkiosk-dual-display.desktop"
 ```
 
-**Warning:** `/api/seed` wipes all data and re-inserts.
+The desktop entry contains an absolute `conkiosk` home path; adapt it for another
+user. Merge the reviewed `deploy/conkiosk-labwc-rc.xml` rules into
+`~/.config/labwc/rc.xml`, configure the actual monitor arrangement, then test a
+desktop restart before relying on unattended boot.
 
-### 👨‍🎓 3. Add / Edit Students
+### HTTPS
 
-In the same `backend/server.py`, edit the `students` list:
+The supplied HTTPS template and `deploy/setup-lan-tls.sh` support a private LAN CA.
+See [HTTPS setup and certificate trust](deploy/HARDENING.md#https-on-this-pi).
+Phones must trust that CA before HTTPS can be used without warnings. HTTP remains
+available during migration and is unencrypted. Enabling an HTTPS listener alone
+does not encrypt clients that continue using HTTP. Native Expo Go trust behavior
+must be checked on the actual phone. Keep CA/private keys outside Git and renew
+the server certificate before expiry.
 
-```python
-students = [
-    {"student_id": "STU2024101", "full_name": "John Dela Cruz",
-     "year_level": "4th Year", "section": "BSCS-4A"},
+## Account management and security
 
-    # ADD MORE STUDENTS HERE ↓
-    {"student_id": "STU2024109", "full_name": "New Student",
-     "year_level": "1st Year", "section": "BSIT-1A"},
-]
+- Passwords are hashed with bcrypt. New passwords require at least eight characters
+  and fit bcrypt's 72-byte UTF-8 input limit; they are not stored in plaintext.
+- Sessions expire after 12 hours and are backed by server-side session records.
+  Logout revokes the current session; a password change/reset revokes all sessions
+  for that account. Protected endpoints check current approval, account, and role.
+- Login, registration, and sensitive administrative actions are throttled. Clear
+  login messages intentionally distinguish missing accounts and wrong passwords.
+- WebSocket credentials are sent in the first frame rather than the URL.
+- Input validation, ownership checks, confirmation dialogs, and database locking
+  protect account and consultation changes. These do not replace network security.
+- `.env` and private keys must not be committed. Keep the Pi, router credentials,
+  and operator account restricted to authorized personnel.
+- Administrative audit records capture the actor ID, action, target, and time.
+  The administrator can view them in the audit screen. They are not a full
+  tamper-proof external audit system.
+
+### Faculty deletion choices
+
+The administrator re-enters their password and explicitly selects either:
+
+| Choice | Result |
+|---|---|
+| Delete account only | Archive the account, revoke sessions, cancel unfinished consultations, remove live queue/request data, and retain consultation history. |
+| Delete account and history | Also delete that faculty's consultation records/notes and submission receipts, and clear the archived profile details. |
+
+School IDs remain reserved to prevent reuse by a different person. Retained history
+is accessible through archived faculty entries. Deletion does not remove shared
+student roster entries or audit records and does not rewrite existing backups.
+History deletion cannot be undone in the app; authorized backup restoration is a
+separate operation that can affect other data and must be planned accordingly.
+
+### Password recovery
+
+Administrators can reset a faculty password from its management card after entering
+their own password. Give replacement credentials to the faculty securely.
+
+An authorized Pi operator can recover the administrator account locally:
+
+```bash
+cd /home/conkiosk/ConKiosk
+backend/venv/bin/python backend/manage.py reset-admin-password
 ```
 
-**In production**, students should be added via a proper registration flow or CSV import — not via seed. For now, students can also self-register by typing their info at the kiosk (auto-saved on submission).
+This prompts for the new password without putting it in shell history and revokes
+the account's existing sessions. There is no public email/SMS recovery service.
 
-### 🖼️ 4. Change Profile Images
+## Student records and privacy
 
-**Faculty profile images** are stored as base64 in PostgreSQL.
-- Users upload from their phones via Profile → tap avatar → pick from gallery.
-- For seed data, you can add a base64 string:
-```python
-{
-    "school_id": "FAC2024001",
-    "profile_image": "data:image/jpeg;base64,/9j/4AAQSkZJ...",
-    ...
-}
-```
-Use any online image-to-base64 converter.
+Students do not log in. QR/manual ID entry is not proof of identity by itself.
+Lookup of existing student details is restricted to loopback, the configured
+`LAN_ORIGIN` host, and any additional `KIOSK_ALLOWED_IPS`. Remote kiosk browsers
+can submit manually without faculty credentials. Public queue responses omit
+student IDs, names, and consultation topics; rescheduling announcements can display
+a student's name, as described in the notice.
 
-**App logo / branding image:**
-- File: `frontend/assets/images/`
-- Replace `icon.png`, `adaptive-icon.png`, `splash-image.png` with your university logo.
-- Update `frontend/app.json` if needed.
+For optional roster matching, import an institution-approved UTF-8 CSV:
 
-### 🃏 5. Edit the TV Display Cards
-
-File: **`frontend/app/tv.tsx`**
-
-**Card layout & size:**
-```ts
-// Line ~130-145 controls responsive columns
-if (width >= 1600) columnCount = 4;      // 4K TVs
-else if (width >= 1200) columnCount = 3; // 1080p TVs
-else if (width >= 800) columnCount = 2;
-else columnCount = 1;
+```text
+student_id,full_name,program,year_level,section
 ```
 
-**Card contents** — search for `<View key={f.school_id}` and edit what's shown:
-- Change avatar size: `styles.avatar` — currently `width: 54, height: 54`
-- Change name font: `styles.facultyName` — currently `fontSize: 15, fontWeight: '700'`
-- Change queue number size: `styles.queueNumber` — currently `fontSize: 20`
-- Add/remove fields (like "Next patient", "ETA", etc.) inside the card JSX
-
-**Header summary chips:**
-Look for `<View style={styles.summaryRow}>` — you can hide the counts or add more.
-
-**Fallback refresh interval** (WebSockets reconnect automatically):
-```ts
-const poll = setInterval(loadData, 10000);  // Every 10 seconds
+```bash
+backend/venv/bin/python backend/manage.py import-roster /path/to/approved-students.csv
 ```
 
-### 🎫 6. Edit the Kiosk Cards (Faculty Grid)
+After import, enable `REQUIRE_STUDENT_ROSTER=true` in `backend/.env` and restart
+the backend to reject IDs not on the roster. It is false until a real roster is
+provided. Strict matching uses roster names/programs; faculty should still check
+the physical ID when required. It never introduces a student password or login.
 
-File: **`frontend/app/kiosk/index.tsx`**
+Registration records the Privacy Notice version and acknowledgment time. Supply
+the official `PRIVACY_INSTITUTION`, `PRIVACY_CONTACT`, and `PRIVACY_RETENTION`
+values in `backend/.env`. The school must approve the notice, access rules, and
+retention policy. The free-text retention setting displays the policy; it does not
+schedule automatic consultation-history deletion or establish legal compliance.
 
-- **Card width** (2-column grid): `styles.card.width` — currently `'48%'`
-- **Card content**: search `<TouchableOpacity ... testID={faculty-card-...`
-- **Avatar shape**: change `borderRadius: 32` to `0` for square cards
+Profile pictures accept JPG, PNG, or WebP, with a 512 KB limit for new uploads.
+They are stored locally and delivered through cached photo endpoints. Group-member
+snapshots are retained with each consultation independently of queue cleanup.
 
-### 📝 7. Edit Consultation Request Form
+## Backups and recovery
 
-File: **`frontend/app/kiosk/request.tsx`**
-- Add fields (e.g., "priority level", "estimated duration") to the `TextInput`s
-- Update the backend model `KioskConsultationRequest` in `backend/server.py` to accept the new fields
-- Update the queue entry insert in `submit_kiosk_request` to store them
+The supplied daily backup timer writes PostgreSQL custom-format archives to
+`/var/lib/conkiosk/backups`, keeps approximately 14 days, and validates archive
+structure before publishing a uniquely named backup. A failed attempt does not
+overwrite a previous good archive. The service uses the local postgres account.
 
-### 🔔 8. Edit Notification Types
+Fresh installation:
 
-File: **`backend/server.py`** — search for `"type":` in notification inserts.
-
-Current types: `new_request`, `accepted`, `declined`, `cancelled`, `rescheduled`, `reminder`, `system`.
-
-To add a new type, also update the icon mapping in **`frontend/app/(tabs)/notifications.tsx`** — function `getNotificationIcon`.
-
-### ⏱️ 9. Change Queue Auto-return Time (Kiosk)
-
-File: **`frontend/app/kiosk/confirmation.tsx`** line ~19:
-```ts
-const t = setTimeout(() => {
-  router.replace('/kiosk');
-}, 15000);   // 15 seconds — change to your preference
+```bash
+cd /home/conkiosk/ConKiosk
+sudo install -d -m 755 /usr/local/lib/conkiosk
+sudo install -m 755 deploy/backup-postgres.sh /usr/local/lib/conkiosk/backup-postgres.sh
+sudo install -d -m 700 -o postgres -g postgres /var/lib/conkiosk/backups
+sudo install -m 644 deploy/conkiosk-backup.service /etc/systemd/system/conkiosk-backup.service
+sudo install -m 644 deploy/conkiosk-backup.timer /etc/systemd/system/conkiosk-backup.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now conkiosk-backup.timer
+sudo systemctl start conkiosk-backup.service
+sudo systemctl list-timers conkiosk-backup.timer
 ```
 
-### 🔐 10. Change JWT Expiration & Secret
+Review failures with `sudo journalctl -u conkiosk-backup.service --no-pager`.
+Configure an actual mounted external destination using `CONKIOSK_BACKUP_MIRROR`
+in a protected `/etc/conkiosk/backup.env`; see [backup notes](deploy/HARDENING.md#backups-and-recovery).
+A backup on the Pi's own storage does not protect against loss of that storage.
 
-File: **`backend/server.py`**
-```python
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "conkiosk-secret-key-change-in-production")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_DAYS = 30   # Change to your preference
+Before handover, restore an archive to a separate test database and check its
+records. Never test restoration by overwriting the live database. Archive-list
+validation alone does not prove that an end-to-end recovery has been tested.
+Record backup location, retention, responsible operator, and the most recent
+restore-test result in the handover document.
+
+## Testing and capstone demonstration
+
+### Automated verification
+
+Create a disposable database owned by the application database role:
+
+```bash
+sudo -u postgres createdb --owner=conkiosk conkiosk_queue_regression
+backend/venv/bin/python backend/tests/security_regression.py
+backend/venv/bin/python backend/tests/queue_regression.py
+cd frontend
+npx tsc --noEmit
+npx expo export --platform web --output-dir dist
 ```
 
-**Always set `JWT_SECRET_KEY` in `.env`** — never commit the real value.
+Skip database creation if it already exists. Both scripts reset only the named
+regression database's tables; run them sequentially. They use local database
+credentials but force a disposable database name. The security test temporarily
+uses loopback port 18009. The older pytest suite uses a separate configuration
+and destructive seed fixtures; follow [its instructions](backend/tests/README.md)
+and never run it against production.
 
-### 📱 11. Change App Name / Bundle ID
+Coverage includes simultaneous submissions/acceptance, duplicate protection,
+queue ordering/advancement, final-note persistence, terminal locks, authentication
+and session revocation, registration races, role restrictions, both deletion
+choices, group history, rescheduling, cancellation, audit records, and throttling.
+Passing these tests is evidence for those cases, not a guarantee of no defects.
 
-File: **`frontend/app.json`**
-```json
-{
-  "expo": {
-    "name": "ConKiosk",              ← App display name
-    "slug": "conkiosk",
-    "ios": { "bundleIdentifier": "com.youruni.conkiosk" },
-    "android": { "package": "com.youruni.conkiosk" }
-  }
-}
+### Manual acceptance procedure
+
+| Test | Expected observation |
+|---|---|
+| Boot Pi before connecting the router | Local backend/database start; LAN access becomes available after the Pi joins its configured network. |
+| Open `/api/health` from another LAN device | API and database report healthy. |
+| Register a faculty member | Matching passwords and Privacy Notice acknowledgment are required; account waits for approval. |
+| Approve or reject registration | Confirmation precedes the action; pending accounts cannot sign in. |
+| Submit individual/group requests | No student login; ticket shown; each group member retained. |
+| Accept multiple requests, including from two devices | One active session per faculty; other students remain waiting in order. |
+| Complete with notes | Notes persist; next accepted student is called and the TV chimes when sound is enabled. |
+| Pause, cancel, and reschedule | Explicit confirmation/reason where applicable; future appointment is visible; closed records cannot be edited. |
+| Transfer IT Chair | Role confirmation; only one chair; records are read-only. |
+| Reset/change password or delete account | Existing sessions lose access; deletion follows the selected retention choice. |
+| Use an untrusted browser to query student lookup | Student details are not returned; manual kiosk submission remains available. |
+| Disconnect router WAN but keep LAN powered | Login, submission, queue, notes, and management continue through the Pi. |
+| Test multiple phone sizes and both Pi displays | Faculty navigation is usable; TV fits all faculty without scrolling; correct HDMI placement. |
+| Disconnect the Pi temporarily | Connection/stale-data indicators appear; recover after reconnecting. |
+| Run backup and test a separate-database restore | Backup succeeds and restored test records can be verified. |
+
+For capstone evaluation, record the build/commit, device/browser versions, network
+conditions, test data, expected/actual outcomes, and evidence. Use authorized
+participants and anonymized records in screenshots/manuscript appendices. Measure
+response time, concurrent use, and usability on the intended hardware before
+claiming results; this README does not assert a tested 10,000-student capacity.
+
+## API overview
+
+The base path is `/api`. Faculty APIs use `Authorization: Bearer <token>`.
+WebSockets use `/ws`; authenticated clients send their token in the first frame.
+Development route/schema details are available at `/docs` on the API server.
+
+| Access | Main endpoints |
+|---|---|
+| Public | `GET /health`, `GET /privacy-notice`, `POST /auth/login`, `POST /auth/signup` |
+| Student kiosk/TV | `GET /kiosk/faculty`, `POST /kiosk/consultation-request`, `GET /kiosk/queue/{faculty_school_id}`, `GET /tv-display/status` |
+| Registered kiosk device only | `GET /kiosk/students/{student_id}`, `POST /kiosk/students` |
+| Faculty | `GET/PATCH /faculty/profile`, `PATCH /faculty/availability`, `POST /auth/logout`, `POST /auth/change-password`, `GET /dashboard/stats` |
+| Faculty requests | `GET /consultation-requests`, `GET /consultation-requests/{id}`, `POST /consultation-requests/{id}/action` |
+| Faculty consultations | `GET /consultations`, `GET/PATCH /consultations/{id}`, `POST /consultations/{id}/start`, `/complete`, `/cancel` |
+| Faculty notifications | `GET /notifications`, `PATCH /notifications/{id}/read`, `POST /notifications/mark-all-read` |
+| Administrator/IT Chair reads | `GET /admin/summary`, `/admin/faculty`, `/admin/students`, `/admin/faculty/{school_id}/consultations`, `/admin/consultations/today` |
+| Administrator writes | Faculty approval/rejection, profile updates, IT Chair assignment/removal, password reset, and account deletion under `/admin` |
+| Administrator audit | `GET /admin/audit` |
+
+Student, consultation, notification, and audit list endpoints supporting pagination
+use `limit` and `offset`, with a default page of 100 and maximum limit of 200.
+Consultation completion accepts notes and an `advance` flag. Account deletion
+accepts `admin_password` and `delete_history` (false by default). Retry-safe kiosk
+submission uses a UUID `submission_id`; the UI reuses it when retrying a request.
+
+## Project structure
+
+```text
+backend/
+  server.py                 Models, validation, API, sessions, queues, WebSockets
+  manage.py                 Local admin recovery and approved roster import
+  requirements.txt          Python dependencies
+  .env.example              Safe configuration template; .env stays private
+  tests/                    Isolated regression scripts and integration tests
+frontend/
+  app/
+    login.tsx, signup.tsx    Faculty access and Privacy Notice
+    admin*.tsx              Administration, password reset, audit
+    (tabs)/                 Faculty dashboard, requests, history, notifications,
+                            profile, and IT Chair records
+    kiosk/                  Faculty selection, identification, request, ticket
+    tv.tsx                  Fixed responsive faculty/queue display
+  src/config/api.ts         Central API address and photo URL resolution
+  src/contexts/             Authentication and current account state
+  src/components/           Shared dialogs, page controls, server status
+  src/utils/                API, timeout handling, storage, realtime, kiosk draft
+  src/hooks/                Bundled icon-font loading
+deploy/                     systemd, Nginx, backups, TLS, dual-display templates
+  HARDENING.md              Detailed security, privacy, recovery, and rollout notes
 ```
 
-### 🏫 12. Filter TV Display by Office (if you have multiple TVs)
-
-Not implemented yet — but easy to add:
-1. Add `office_room` field to faculty seed data
-2. Backend: change `GET /api/tv-display/status` to accept `?office=Room301` query
-3. Frontend: read `office` from URL: `/tv?office=Room301`
-
-Ask the maintainer or implement it yourself; the route is in `backend/server.py` around line 700.
-
----
-
-## Raspberry Pi 5 Deployment
-
-See **`RPI5_DEPLOYMENT.md`** for the full step-by-step guide, including:
-- Installing PostgreSQL, Python, Chromium on RPi 5
-- Running the backend as a systemd service
-- Setting up the kiosk to auto-launch on boot
-- Configuring nginx to serve the web build and proxy WebSockets
-- USB QR scanner setup (HID keyboard, no drivers needed)
-- Security hardening for production use
-
-**Short version:**
-1. Install PostgreSQL and Python 3.11 on the RPi.
-2. Copy this repo to the RPi.
-3. Run backend as a service (see `.service` file example in the guide).
-4. On your dev machine: `cd frontend && npx expo export -p web` — creates a `dist/` folder.
-5. Copy `dist/` to the RPi, serve via nginx.
-6. Point Chromium (kiosk mode) at `http://localhost/kiosk` and `http://localhost/tv`.
-7. Update the mobile app's `.env` to use the Nginx LAN API: `EXPO_PUBLIC_API_URL=http://192.168.x.x/api`
-8. Build the APK (see Expo docs or use EAS Build).
-
----
+[LAN_OFFLINE_DEPLOYMENT.md](LAN_OFFLINE_DEPLOYMENT.md) provides additional LAN
+setup context. [RPI5_DEPLOYMENT.md](RPI5_DEPLOYMENT.md) is an older hardware/setup
+reference; some examples predate current security changes. For current behavior,
+use this README, [HARDENING.md](deploy/HARDENING.md), and the actual deploy templates.
 
 ## Troubleshooting
 
-| Problem | Solution |
-|---------|----------|
-| Faculty app can't reach backend | Check that phone + RPi are on the same WiFi. Verify RPi's IP with `hostname -I`. Check `frontend/.env`. |
-| Faculty cannot sign in after registering | An Administrator must approve the pending registration first. |
-| Kiosk / TV shows blank page | Ensure Expo dev server is running, or that `nginx` is serving the `dist/` folder. |
-| Real-time updates do not arrive | Check nginx `proxy_pass` for `/ws` and the backend service logs. |
-| PostgreSQL won't start | `sudo journalctl -u postgresql` — often out of disk space or a configuration issue. |
-| QR scanner types garbage | Most scanners have a config mode (scan a "settings" barcode from their manual). Set to "USB HID keyboard, English, US layout, add Enter suffix." |
-| 500 error on any endpoint | Check backend logs: `sudo journalctl -u conkiosk -f`. |
-| I broke seed data | Just re-run `curl -X POST http://<backend-url>/api/seed`. |
+| Symptom | Checks |
+|---|---|
+| Phone cannot reach login | Confirm Pi address with `hostname -I`; use the Pi IP, not the router IP; check same LAN and client isolation. |
+| API health fails | `sudo systemctl status conkiosk.service postgresql nginx`; inspect `sudo journalctl -u conkiosk.service -n 50 --no-pager`. |
+| Brief 502 after restart | Wait for backend startup, retry health, and inspect logs if it persists. |
+| Faculty registration cannot sign in | Check administrator approval, account status, and exact School ID/password. |
+| Existing login stops after an update/reset | Refresh and sign in again; session/security updates intentionally invalidate old tokens. |
+| Too many attempts | Wait for the displayed limit; investigate repeated clients instead of disabling throttling. |
+| Accepted student stays Waiting | Check the active session and earlier pending request; FIFO intentionally prevents starting out of turn. |
+| TV is silent | Click Sound once, check HDMI audio output/TV volume, and verify the launcher autoplay setting. |
+| One display does not open at boot | Check both outputs with `wlr-randr`, TV input, desktop autologin, and Labwc placement rules. |
+| HTTPS warns about certificate | Install and verify the local CA on that device; check the IP/SAN and expiry. Do not bypass verification as a deployment solution. |
+| Student lookup denied on another device | Lookup is restricted; use manual entry or configure that fixed kiosk IP explicitly. No student login is needed. |
+| Profile image fails | Use a supported format and an image of at most 512 KB; check the API error. |
+| QR scanner gives incomplete input | Configure USB HID mode, correct keyboard layout, and an Enter suffix; manually verify parsed details. |
+| Native Expo QR points at the wrong machine | Use `npx expo start --lan` with the Pi API configured; the optional LAN launcher targets its own host. |
+| Backup fails | Inspect backup service logs, free space, permissions, and any configured mirror mount. |
 
----
+Do not use `/api/seed` as a production troubleshooting or recovery step.
 
-## Production deployment checklist
+## Limitations and handover
 
-- [ ] Copy `backend/.env.example` to `backend/.env`; set `ENVIRONMENT=production`, a long unique `JWT_SECRET_KEY`, restricted `CORS_ORIGINS`, and `ALLOW_SEED_DATA=false`.
-- [ ] Use a dedicated PostgreSQL account with a strong password and least-privilege access.
-- [ ] Import faculty and student records through an approved administrative process. Do not call `/api/seed` after real data exists.
-- [ ] Have the school's Data Protection Officer review the registration Privacy Notice and add the official institution name, DPO contact details, and retention schedule.
-- [ ] Keep the kiosk and TV on the school network; use a firewall to expose only the required local ports. Enable HTTPS if any access leaves that network.
-- [ ] Back up PostgreSQL regularly and test restoring a backup: `pg_dump -U conkiosk conkiosk > conkiosk.sql`.
-- [ ] Test the full workflow with non-production accounts: scan → submit → queue ticket → faculty start → TV “Now Serving” → complete.
+- A working LAN, powered Pi, and router are required for client access. Offline
+  LAN operation does not mean disconnected phones can submit consultations.
+- The single Pi is a central point of failure; no failover or offline write queue
+  is implemented. WebSocket connections/throttling are process-local; deployment
+  currently assumes one backend worker.
+- Very large faculty lists fit by shrinking cards, which can reduce readability.
+  Queue pages rotate; very large database workloads need measured capacity testing.
+- Appointment times/office hours are not a room-booking/conflict-detection system.
+- Existing group details already purged by older versions cannot be reconstructed
+  without a suitable backup. Historical dates recorded by old versions are not
+  automatically rewritten to Philippine local dates.
+- HTTPS trust on phones, a verified student roster, official privacy settings,
+  an external backup destination, and physical TV/QR/Expo checks require local
+  institutional/operator participation.
+- Cloud push/email, multi-server operation, external tamper-proof audit storage,
+  and automatic retention-policy enforcement are outside the implemented scope.
 
----
+Before capstone turnover, record the deployed commit, hardware/network layout,
+private credential handover process, responsible administrator/maintainer, backup
+and recovery procedure, known issues, test results, and actual authors/adviser/
+institution details in the approved project documentation. Never place private
+passwords, student records, or completed privacy forms in a public repository.
 
-## API Reference
-
-Base URL: `http://<backend-url>/api`
-
-### Public (Kiosk / TV)
-- `GET /kiosk/faculty` — List all faculty with availability
-- `GET /kiosk/students/{student_id}` — Lookup student by ID
-- `POST /kiosk/students` — Create/update student
-- `POST /kiosk/consultation-request` — Submit consultation request from kiosk
-- `GET /kiosk/queue/{faculty_school_id}` — Get faculty queue
-- `GET /tv-display/status` — Full TV dashboard data
-
-### Authenticated (Faculty App)
-- `POST /auth/login`
-- `POST /auth/signup` — creates a pending faculty registration
-- `POST /auth/change-password`
-- `GET/PATCH /faculty/profile`
-- `PATCH /faculty/availability`
-- `GET /dashboard/stats`
-- `GET /consultation-requests` — list pending
-- `POST /consultation-requests/{id}/action` — accept/decline/reschedule
-- `GET/PATCH /consultations` — history, notes, remarks
-- `POST /consultations/{id}/start` — auto-sets faculty to busy
-- `POST /consultations/{id}/complete` — auto-sets back to available, advances queue
-- `GET/PATCH /notifications`, `POST /notifications/mark-all-read`
-
-### Administrator / IT Chair records
-- `GET /admin/summary`, `GET /admin/faculty`, `GET /admin/students`
-- `GET /admin/faculty/{school_id}/consultations` — read-only consultation records,
-  including faculty Notes/feedback for authorized Administrator and IT Chair users
-- `POST /admin/faculty/{school_id}/approve` and `POST /admin/faculty/{school_id}/reject`
-- `POST /admin/it-chair/{school_id}`, `DELETE /admin/it-chair`
-- `DELETE /admin/faculty/{school_id}` — requires an authenticated Administrator and
-  JSON body `{ "admin_password": "current-password" }`
-
----
-
-## Contributing / Extending
-
-Some ideas for future work:
-- **Analytics dashboard** for department heads (per-department trends, response times)
-- **Email notifications** via SendGrid or Resend
-- **Push notifications** for the mobile app (via Expo push service)
-- **QR code generator** endpoint that prints student ID cards as PDFs
-- **Multi-office support** — filter TV display by office/building
-- **Group chat** for group consultations
-
----
-
-## License
-
-This is a student capstone project. Adapt freely for your own school.
-
----
-
-## Credits
-
-Built as a capstone project.
-System architecture based on the ConKiosk specification.
-
----
-
-**For deployment questions, refer to `RPI5_DEPLOYMENT.md`.**
-
-# Security and records update
-
-See [deployment and security notes](deploy/HARDENING.md) for session revocation,
-anonymous student kiosk access, the two faculty-deletion choices, password recovery,
-roster matching, privacy configuration, HTTPS setup and the daily backup service.
+No standalone software license is currently declared in this repository. Obtain
+the researchers' and institution's permission before redistribution; this README
+does not grant a license or replace institutional ownership policies.
