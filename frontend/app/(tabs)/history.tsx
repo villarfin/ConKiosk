@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ApiClient } from '@/src/utils/api';
+import { useFocusEffect } from 'expo-router';
 
 interface Consultation {
   _id: string;
@@ -41,9 +42,11 @@ export default function HistoryScreen() {
   const [editNotes, setEditNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     loadHistory();
-  }, [statusFilter]);
+    const timer = setInterval(loadHistory, 5000);
+    return () => clearInterval(timer);
+  }, [statusFilter, searchQuery]));
 
   const loadHistory = async () => {
     try {
@@ -122,7 +125,7 @@ export default function HistoryScreen() {
       closeDetails();
       loadHistory();
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to start consultation');
+      Alert.alert('Error', error.message || 'Failed to start consultation');
     } finally {
       setSaving(false);
     }
@@ -132,12 +135,12 @@ export default function HistoryScreen() {
     if (!selectedConsultation) return;
     setSaving(true);
     try {
-      await ApiClient.post(`/consultations/${selectedConsultation._id}/complete`, { notes: editNotes });
-      Alert.alert('Success', 'Consultation completed. Queue advanced.');
+      const result = await ApiClient.post(`/consultations/${selectedConsultation._id}/complete`, { notes: editNotes });
+      Alert.alert('Success', result.next_started ? 'Notes saved. Consultation completed and the next student has been called.' : 'Notes saved. Consultation completed.');
       closeDetails();
       loadHistory();
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to complete consultation');
+      Alert.alert('Error', error.message || 'Failed to complete consultation');
     } finally {
       setSaving(false);
     }

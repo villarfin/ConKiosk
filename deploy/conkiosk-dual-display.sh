@@ -39,5 +39,5 @@ chromium --ozone-platform=wayland --enable-features=UseOzonePlatform \
   --disable-infobars --user-data-dir="$KIOSK_PROFILE" "$KIOSK_URL" >/dev/null 2>&1 &
 
 chromium --ozone-platform=wayland --enable-features=UseOzonePlatform \
-  --class=conkiosk-tv --kiosk --no-first-run --disable-session-crashed-bubble \
+  --class=conkiosk-tv --kiosk --autoplay-policy=no-user-gesture-required --no-first-run --disable-session-crashed-bubble \
   --disable-infobars --user-data-dir="$TV_PROFILE" "$TV_URL" >/dev/null 2>&1 &

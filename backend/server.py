@@ -127,6 +127,7 @@ class ConsultationRecord(Base):
     consultation_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 class NotificationRecord(Base):
     __tablename__ = "notifications"
@@ -210,6 +211,27 @@ async def reset_queue_counter_if_empty(db: AsyncSession, faculty_school_id: str)
         if counter:
             counter.last_number = 0
 
+async def lock_faculty_queue(db: AsyncSession, faculty: Faculty) -> None:
+    """Serialize all queue mutations for a faculty, including empty queues."""
+    await db.execute(select(Faculty).where(Faculty.school_id == faculty.school_id).with_for_update())
+
+async def advance_queue(db: AsyncSession, faculty: Faculty) -> Optional[ConsultationRecord]:
+    await db.flush()
+    if await db.scalar(select(ConsultationRecord.id).where(and_(ConsultationRecord.faculty_school_id == faculty.school_id, ConsultationRecord.status == 'ongoing'))):
+        return None
+    head = await db.scalar(select(QueueRecord).where(and_(QueueRecord.faculty_school_id == faculty.school_id, QueueRecord.status == 'waiting')).order_by(QueueRecord.queue_number).limit(1))
+    if not head:
+        return None
+    consultation = await db.scalar(select(ConsultationRecord).where(and_(ConsultationRecord.queue_id == head.id, ConsultationRecord.status == 'scheduled')).order_by(ConsultationRecord.created_at).limit(1))
+    # A pending request must be accepted before its student can be called.
+    if not consultation:
+        return None
+    consultation.status = 'ongoing'
+    consultation.started_at = consultation.updated_at = now()
+    head.status = 'serving'
+    faculty.availability_status = 'busy'
+    return consultation
+
 class Connections:
     def __init__(self): self.all: set[WebSocket] = set(); self.faculty: dict[str, set[WebSocket]] = {}
     async def connect(self, ws: WebSocket, faculty_id: Optional[str]):
@@ -243,6 +265,35 @@ async def startup():
         await conn.execute(text("ALTER TABLE faculty ADD COLUMN IF NOT EXISTS role VARCHAR(32) NOT NULL DEFAULT 'faculty'"))
         await conn.execute(text("ALTER TABLE faculty ADD COLUMN IF NOT EXISTS accepting_consultations BOOLEAN NOT NULL DEFAULT false"))
         await conn.execute(text("ALTER TABLE faculty ADD COLUMN IF NOT EXISTS is_approved BOOLEAN NOT NULL DEFAULT true"))
+        await conn.execute(text("ALTER TABLE consultations ADD COLUMN IF NOT EXISTS started_at TIMESTAMP NULL"))
+        await conn.execute(text("""
+            WITH duplicates AS (
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY queue_id
+                    ORDER BY CASE WHEN status = 'ongoing' THEN 0 ELSE 1 END, created_at, id) AS position
+                FROM consultations WHERE queue_id IS NOT NULL AND status IN ('ongoing', 'scheduled')
+            ) UPDATE consultations SET status = 'cancelled',
+                remarks = CONCAT(COALESCE(remarks, ''), ' [Duplicate active ticket reconciled; notes retained.]')
+              WHERE id IN (SELECT id FROM duplicates WHERE position > 1)
+        """))
+        # Preserve legacy history and notes; keep the earliest session active and
+        # move accidental concurrent sessions back into the waiting workflow.
+        await conn.execute(text("""
+            WITH ranked AS (
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY faculty_school_id
+                    ORDER BY queue_number ASC NULLS LAST, created_at, id) AS position
+                FROM consultations WHERE status = 'ongoing'
+            ) UPDATE consultations SET status = 'scheduled', started_at = NULL
+              WHERE id IN (SELECT id FROM ranked WHERE position > 1)
+        """))
+        await conn.execute(text("UPDATE consultations SET started_at = updated_at WHERE status = 'ongoing' AND started_at IS NULL"))
+        await conn.execute(text("""UPDATE queue q SET status = 'waiting'
+            WHERE q.status = 'serving' AND NOT EXISTS (
+                SELECT 1 FROM consultations c WHERE c.queue_id = q.id AND c.status = 'ongoing')"""))
+        await conn.execute(text("""UPDATE queue q SET status = 'serving'
+            WHERE q.status = 'waiting' AND EXISTS (
+                SELECT 1 FROM consultations c WHERE c.queue_id = q.id AND c.status = 'ongoing')"""))
+        await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS one_ongoing_consultation_per_faculty ON consultations (faculty_school_id) WHERE status = 'ongoing'"))
+        await conn.execute(text("UPDATE faculty f SET availability_status = 'busy' WHERE EXISTS (SELECT 1 FROM consultations c WHERE c.faculty_school_id = f.school_id AND c.status = 'ongoing')"))
     if ADMIN_SCHOOL_ID and ADMIN_PASSWORD:
         async with SessionLocal() as db:
             admin = await db.scalar(select(Faculty).where(Faculty.school_id == ADMIN_SCHOOL_ID))
@@ -312,6 +363,9 @@ async def update_profile(payload: FacultyProfileUpdate, db: AsyncSession = Depen
     await db.commit(); await db.refresh(faculty); return serialize(faculty, True)
 @api.patch("/faculty/availability")
 async def availability(payload: AvailabilityUpdate, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
+    await lock_faculty_queue(db, faculty)
+    if payload.status != 'busy' and await db.scalar(select(ConsultationRecord.id).where(and_(ConsultationRecord.faculty_school_id == faculty.school_id, ConsultationRecord.status == 'ongoing'))):
+        raise HTTPException(409, 'Complete the active consultation before changing availability')
     if payload.status not in {"available", "busy", "unavailable"}: raise HTTPException(422, "Invalid availability status")
     faculty.availability_status = payload.status
     faculty.accepting_consultations = (payload.status == "available") if payload.accepting_consultations is None else payload.accepting_consultations
@@ -322,9 +376,13 @@ async def availability(payload: AvailabilityUpdate, db: AsyncSession = Depends(s
     return {"message": "Availability updated", "status": faculty.availability_status, "accepting_consultations": faculty.accepting_consultations}
 @api.post("/auth/logout")
 async def logout(db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
-    faculty.availability_status = "unavailable"; faculty.accepting_consultations = False; await db.commit()
-    await connections.send("availability_changed", {"faculty_id": faculty.school_id, "status": "unavailable", "accepting_consultations": False})
-    return {"message": "Logged out and marked unavailable"}
+    await lock_faculty_queue(db, faculty)
+    active = await db.scalar(select(ConsultationRecord.id).where(and_(ConsultationRecord.faculty_school_id == faculty.school_id, ConsultationRecord.status == 'ongoing')))
+    faculty.availability_status = 'busy' if active else 'unavailable'
+    faculty.accepting_consultations = False
+    await db.commit()
+    await connections.send('availability_changed', {'faculty_id': faculty.school_id, 'status': faculty.availability_status, 'accepting_consultations': False})
+    return {'message': 'Logged out'}
 @api.post("/auth/change-password")
 async def change_password(payload: ChangePasswordRequest, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
     if not pwd_context.verify(payload.current_password, faculty.password_hash): raise HTTPException(400, "Current password is incorrect")
@@ -447,8 +505,10 @@ async def student_create(payload: Student, db: AsyncSession = Depends(session)):
 @api.post("/kiosk/consultation-request")
 async def kiosk_request(payload: KioskConsultationRequest, db: AsyncSession = Depends(session)):
     if not payload.topic.strip() or not payload.students: raise HTTPException(422, "Topic and at least one student are required")
-    faculty = await db.scalar(select(Faculty).where(Faculty.school_id == payload.faculty_school_id))
+    faculty = await db.scalar(select(Faculty).where(Faculty.school_id == payload.faculty_school_id).with_for_update())
     if not faculty: raise HTTPException(404, "Faculty not found")
+    if faculty.role not in {'faculty', 'it_chair'} or not faculty.is_approved or faculty.availability_status == 'unavailable' or (faculty.availability_status == 'busy' and not faculty.accepting_consultations):
+        raise HTTPException(409, 'This faculty is not accepting consultations')
     for student in payload.students:
         if not await db.scalar(select(StudentRecord).where(StudentRecord.student_id == student.student_id)): db.add(StudentRecord(**student.model_dump()))
     # Remove historical closed entries before allocating a fresh queue number.
@@ -508,17 +568,24 @@ async def request_detail(request_id: str, db: AsyncSession = Depends(session), f
     return item
 @api.post("/consultation-requests/{request_id}/action")
 async def request_action(request_id: str, payload: ConsultationAction, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
+    await lock_faculty_queue(db, faculty)
     row = await db.scalar(select(ConsultationRequestRecord).where(and_(ConsultationRequestRecord.id == request_id, ConsultationRequestRecord.faculty_school_id == faculty.school_id)))
     if not row: raise HTTPException(404, "Request not found")
+    if row.status != 'pending': raise HTTPException(409, 'This request has already been processed. Refresh your requests.')
     if payload.action == "accept":
         row.status = "accepted"
-        consultation = ConsultationRecord(faculty_school_id=faculty.school_id, student_id=row.student_id, student_name=row.student_name, student_program=row.student_program, topic=row.topic, date=row.preferred_date, time=row.preferred_time, status="ongoing", queue_id=row.queue_id, queue_number=row.queue_number, consultation_type=row.consultation_type)
-        if row.queue_id:
-            queue = await db.get(QueueRecord, row.queue_id)
-            if queue:
-                queue.status = "serving"
-        faculty.availability_status = "busy"
-        db.add(consultation); event = "consultation_started"
+        consultation = ConsultationRecord(faculty_school_id=faculty.school_id, student_id=row.student_id, student_name=row.student_name, student_program=row.student_program, topic=row.topic, date=row.preferred_date, time=row.preferred_time, status="scheduled", queue_id=row.queue_id, queue_number=row.queue_number, consultation_type=row.consultation_type)
+        db.add(consultation)
+        started = await advance_queue(db, faculty)
+        if not row.queue_id and not started:
+            active = await db.scalar(select(ConsultationRecord.id).where(and_(ConsultationRecord.faculty_school_id == faculty.school_id, ConsultationRecord.status == 'ongoing')))
+            waiting = await db.scalar(select(QueueRecord.id).where(and_(QueueRecord.faculty_school_id == faculty.school_id, QueueRecord.status == 'waiting')))
+            if not active and not waiting:
+                consultation.status = 'ongoing'
+                consultation.started_at = consultation.updated_at = now()
+                faculty.availability_status = 'busy'
+                started = consultation
+        event = 'consultation_started' if started else 'consultation_accepted'
     elif payload.action == "decline":
         row.status = "declined"; row.decline_reason = payload.reason; event = "queue_updated"
         if row.queue_id:
@@ -534,6 +601,7 @@ async def request_action(request_id: str, payload: ConsultationAction, db: Async
                 queue.status = "cancelled"
                 await reset_queue_counter_if_empty(db, faculty.school_id)
     else: raise HTTPException(400, "Invalid action or missing reschedule details")
+    if payload.action != 'accept': await advance_queue(db, faculty)
     db.add(NotificationRecord(faculty_school_id=faculty.school_id, type=payload.action, title=f"Request {payload.action.title()}ed", message=f"Request from {row.student_name} was {payload.action}ed")); await db.commit()
     event_data = {"faculty_id": faculty.school_id}
     if payload.action == "reschedule":
@@ -545,7 +613,7 @@ async def request_action(request_id: str, payload: ConsultationAction, db: Async
     # Public kiosk and TV displays must receive faculty actions too.
     await connections.send("queue_updated", event_data)
     await connections.send("availability_changed", event_data)
-    return {"message": f"Request {payload.action}ed", "status": row.status}
+    return {"message": f"Request {payload.action}ed", "status": row.status, "consultation_status": consultation.status if payload.action == 'accept' else None}
 
 @api.get("/consultations")
 async def consultations(status: Optional[str] = None, search: Optional[str] = None, date_from: Optional[str] = None, date_to: Optional[str] = None, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
@@ -562,6 +630,7 @@ async def consultation_detail(consultation_id: str, db: AsyncSession = Depends(s
     return serialize(row)
 @api.patch("/consultations/{consultation_id}")
 async def consultation_update(consultation_id: str, payload: ConsultationUpdate, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
+    await lock_faculty_queue(db, faculty)
     row = await db.scalar(select(ConsultationRecord).where(and_(ConsultationRecord.id == consultation_id, ConsultationRecord.faculty_school_id == faculty.school_id)))
     if not row: raise HTTPException(404, "Consultation not found")
     if row.status in {"completed", "cancelled"}:
@@ -572,6 +641,7 @@ async def consultation_update(consultation_id: str, payload: ConsultationUpdate,
     row.updated_at = now(); await db.commit(); return serialize(row)
 @api.post("/consultations/{consultation_id}/start")
 async def consultation_start(consultation_id: str, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
+    await lock_faculty_queue(db, faculty)
     row = await db.scalar(select(ConsultationRecord).where(and_(ConsultationRecord.id == consultation_id, ConsultationRecord.faculty_school_id == faculty.school_id)))
     if not row: raise HTTPException(404, "Consultation not found")
     if row.status in {"completed", "cancelled"}:
@@ -580,7 +650,16 @@ async def consultation_start(consultation_id: str, db: AsyncSession = Depends(se
         return {"message": "Consultation is already ongoing", "status": "ongoing"}
     if row.status != "scheduled":
         raise HTTPException(409, "Only scheduled consultations can be started")
-    row.status = "ongoing"; row.updated_at = now(); faculty.availability_status = "busy"
+    if await db.scalar(select(ConsultationRecord.id).where(and_(ConsultationRecord.faculty_school_id == faculty.school_id, ConsultationRecord.status == 'ongoing'))):
+        raise HTTPException(409, 'Complete the current session before starting another')
+    head = await db.scalar(select(QueueRecord).where(and_(QueueRecord.faculty_school_id == faculty.school_id, QueueRecord.status == 'waiting')).order_by(QueueRecord.queue_number).limit(1))
+    if head and head.id != row.queue_id:
+        raise HTTPException(409, 'Please serve the first student in the queue before this consultation')
+    if row.queue_id:
+        linked_queue = await db.get(QueueRecord, row.queue_id)
+        if not linked_queue or linked_queue.status != 'waiting':
+            raise HTTPException(409, 'This queue ticket is no longer waiting')
+    row.status = "ongoing"; row.started_at = row.updated_at = now(); faculty.availability_status = "busy"
     if row.queue_id:
         queue = await db.get(QueueRecord, row.queue_id)
         if queue: queue.status = "serving"
@@ -589,6 +668,7 @@ async def consultation_start(consultation_id: str, db: AsyncSession = Depends(se
     return {"message": "Consultation started", "status": "ongoing"}
 @api.post("/consultations/{consultation_id}/complete")
 async def consultation_complete(consultation_id: str, payload: Optional[ConsultationComplete] = None, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
+    await lock_faculty_queue(db, faculty)
     row = await db.scalar(select(ConsultationRecord).where(and_(ConsultationRecord.id == consultation_id, ConsultationRecord.faculty_school_id == faculty.school_id)))
     if not row: raise HTTPException(404, "Consultation not found")
     if row.status in {"completed", "cancelled"}:
@@ -596,15 +676,17 @@ async def consultation_complete(consultation_id: str, payload: Optional[Consulta
     if row.status != "ongoing":
         raise HTTPException(409, "Start the consultation before completing it")
     if payload and payload.notes is not None: row.notes = payload.notes
-    row.duration = max(1, int((now() - row.updated_at).total_seconds() / 60)); row.status = "completed"; row.updated_at = now(); faculty.availability_status = "available"
+    row.duration = max(1, int((now() - (row.started_at or row.updated_at)).total_seconds() / 60)); row.status = "completed"; row.updated_at = now()
     if row.queue_id:
         queue = await db.get(QueueRecord, row.queue_id)
         if queue:
             queue.status = "completed"
             await reset_queue_counter_if_empty(db, faculty.school_id)
+    next_session = await advance_queue(db, faculty)
+    if not next_session: faculty.availability_status = 'available'
     await db.commit()
     for event in ("consultation_completed", "queue_updated", "availability_changed"): await connections.send(event, {"faculty_id": faculty.school_id})
-    return {"message": "Consultation completed", "duration_minutes": row.duration}
+    return {"message": "Consultation completed", "duration_minutes": row.duration, "next_started": bool(next_session)}
 
 @api.get("/dashboard/stats")
 async def dashboard_stats(db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
@@ -636,7 +718,7 @@ async def tv_status(db: AsyncSession = Depends(session)):
     output = []
     for faculty in (await db.scalars(select(Faculty).where(Faculty.role.in_(["faculty", "it_chair"])).order_by(Faculty.full_name))).all():
         queue = (await db.scalars(select(QueueRecord).where(and_(QueueRecord.faculty_school_id == faculty.school_id, QueueRecord.status.in_(["waiting", "serving"]))).order_by(QueueRecord.queue_number))).all(); serving = next((item for item in queue if item.status == "serving"), None); waiting = [item for item in queue if item.status == "waiting"]
-        output.append({"school_id": faculty.school_id, "full_name": faculty.full_name, "department": faculty.department, "office_location": faculty.office_location, "profile_image": faculty.profile_image, "availability_status": faculty.availability_status, "now_serving": {"queue_number": queue_label(serving.queue_number), "student_names": serving.student_names, "topic": serving.topic} if serving else None, "waiting_count": len(waiting), "next_queue_numbers": [queue_label(item.queue_number) for item in waiting[:5]]})
+        output.append({"school_id": faculty.school_id, "full_name": faculty.full_name, "department": faculty.department, "office_location": faculty.office_location, "profile_image": faculty.profile_image, "availability_status": faculty.availability_status, "now_serving": {"queue_id": serving.id, "queue_number": queue_label(serving.queue_number), "student_names": serving.student_names, "topic": serving.topic} if serving else None, "waiting_count": len(waiting), "next_queue_numbers": [queue_label(item.queue_number) for item in waiting]})
     return output
 @api.post("/seed")
 async def seed_demo_data(db: AsyncSession = Depends(session)):

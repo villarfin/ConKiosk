@@ -11,3 +11,12 @@ database only—never staging or production.
 
 The `RUN_INTEGRATION_TESTS` guard is intentional: the suite changes data as part of
 its end-to-end checks.
+
+Queue concurrency regression: create a disposable `conkiosk_queue_regression`
+database owned by the application's database role, then run
+`backend/venv/bin/python backend/tests/queue_regression.py` from the repository root.
+This script uses the local database credentials but forces the database name to
+`conkiosk_queue_regression`. It resets only that disposable database's tables.
+It exercises concurrent submissions and acceptance, repeated acceptance,
+FIFO advancement, pending approval, note persistence, timing, terminal locks,
+and faculty acceptance restrictions.

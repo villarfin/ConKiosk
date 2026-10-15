@@ -106,15 +106,15 @@ export default function RequestsScreen() {
 
     setActionLoading(true);
     try {
-      await ApiClient.post(`/consultation-requests/${selectedRequest._id}/action`, {
+      const result = await ApiClient.post(`/consultation-requests/${selectedRequest._id}/action`, {
         action: 'accept',
       });
 
-      Alert.alert('Session started', 'The consultation is now ongoing and your availability is set to Busy.');
+      Alert.alert(result.consultation_status === 'ongoing' ? 'Session started' : 'Request accepted', result.consultation_status === 'ongoing' ? 'The consultation is ongoing. Your availability is Busy.' : 'The student is waiting in queue and will be called when their turn is reached.');
       closeActionModal();
       loadRequests();
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to accept request');
+      Alert.alert('Error', error.message || 'Failed to accept request');
     } finally {
       setActionLoading(false);
     }
