@@ -110,7 +110,7 @@ export default function RequestsScreen() {
         action: 'accept',
       });
 
-      Alert.alert('Success', 'Consultation request accepted');
+      Alert.alert('Session started', 'The consultation is now ongoing and your availability is set to Busy.');
       closeActionModal();
       loadRequests();
     } catch (error: any) {

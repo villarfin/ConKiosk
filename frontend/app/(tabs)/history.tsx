@@ -39,7 +39,6 @@ export default function HistoryScreen() {
   const [selectedConsultation, setSelectedConsultation] = useState<Consultation | null>(null);
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [editNotes, setEditNotes] = useState('');
-  const [editStatus, setEditStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -86,7 +85,6 @@ export default function HistoryScreen() {
   const openDetails = (consultation: Consultation) => {
     setSelectedConsultation(consultation);
     setEditNotes(consultation.notes || '');
-    setEditStatus(consultation.status);
     setDetailsModalVisible(true);
   };
 
@@ -94,7 +92,6 @@ export default function HistoryScreen() {
     setDetailsModalVisible(false);
     setSelectedConsultation(null);
     setEditNotes('');
-    setEditStatus('');
   };
 
   const saveConsultationDetails = async () => {
@@ -104,7 +101,6 @@ export default function HistoryScreen() {
     try {
       await ApiClient.patch(`/consultations/${selectedConsultation._id}`, {
         notes: editNotes,
-        status: editStatus,
       });
 
       Alert.alert('Success', 'Consultation updated successfully');
@@ -115,10 +111,6 @@ export default function HistoryScreen() {
     } finally {
       setSaving(false);
     }
-  };
-
-  const markAsCompleted = () => {
-    setEditStatus('completed');
   };
 
   const startConsultation = async () => {
@@ -140,7 +132,7 @@ export default function HistoryScreen() {
     if (!selectedConsultation) return;
     setSaving(true);
     try {
-      await ApiClient.post(`/consultations/${selectedConsultation._id}/complete`);
+      await ApiClient.post(`/consultations/${selectedConsultation._id}/complete`, { notes: editNotes });
       Alert.alert('Success', 'Consultation completed. Queue advanced.');
       closeDetails();
       loadHistory();
@@ -329,39 +321,20 @@ export default function HistoryScreen() {
 
                   <View style={styles.detailSection}>
                     <Text style={styles.detailLabel}>Status</Text>
-                    <View style={styles.statusOptions}>
-                      {['scheduled', 'ongoing', 'completed', 'cancelled'].map((status) => (
-                        <TouchableOpacity
-                          key={status}
-                          style={[
-                            styles.statusOption,
-                            editStatus === status && { backgroundColor: getStatusColor(status) },
-                          ]}
-                          onPress={() => setEditStatus(status)}
-                        >
-                          <Text
-                            style={[
-                              styles.statusOptionText,
-                              editStatus === status && styles.statusOptionTextActive,
-                            ]}
-                          >
-                            {status.charAt(0).toUpperCase() + status.slice(1)}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
+                    <View style={[styles.statusReadOnly, { backgroundColor: getStatusColor(selectedConsultation.status) }]}><Text style={styles.statusText}>{selectedConsultation.status.toUpperCase()}</Text></View>
                   </View>
 
                   <View style={styles.detailSection}>
                     <Text style={styles.detailLabel}>Notes</Text>
                     <TextInput
-                      style={styles.textArea}
-                      placeholder="Add consultation notes..."
+                      style={[styles.textArea, ['completed', 'cancelled'].includes(selectedConsultation.status) && styles.textAreaLocked]}
+                      placeholder={['completed', 'cancelled'].includes(selectedConsultation.status) ? 'This consultation is locked.' : 'Add consultation notes...'}
                       value={editNotes}
                       onChangeText={setEditNotes}
                       multiline
                       numberOfLines={4}
                       textAlignVertical="top"
+                      editable={!['completed', 'cancelled'].includes(selectedConsultation.status)}
                     />
                   </View>
 
@@ -389,27 +362,7 @@ export default function HistoryScreen() {
                     </TouchableOpacity>
                   )}
 
-                  {selectedConsultation.status !== 'completed' && selectedConsultation.status !== 'ongoing' && selectedConsultation.status !== 'scheduled' && (
-                    <TouchableOpacity
-                      style={styles.completeButton}
-                      onPress={markAsCompleted}
-                    >
-                      <Ionicons name="checkmark-done" size={20} color="#4CAF50" />
-                      <Text style={styles.completeButtonText}>Mark as Completed</Text>
-                    </TouchableOpacity>
-                  )}
-
-                  <TouchableOpacity
-                    style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-                    onPress={saveConsultationDetails}
-                    disabled={saving}
-                  >
-                    {saving ? (
-                      <ActivityIndicator color="#FFFFFF" />
-                    ) : (
-                      <Text style={styles.saveButtonText}>Save Changes</Text>
-                    )}
-                  </TouchableOpacity>
+                  {['completed', 'cancelled'].includes(selectedConsultation.status) ? <View style={styles.lockedNotice}><Ionicons name="lock-closed-outline" size={18} color="#475569" /><Text style={styles.lockedNoticeText}>Completed and cancelled consultations are read-only.</Text></View> : <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={saveConsultationDetails} disabled={saving}>{saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveButtonText}>Save Notes</Text>}</TouchableOpacity>}
                 </>
               )}
             </ScrollView>
@@ -626,26 +579,11 @@ const styles = StyleSheet.create({
     color: '#666666',
     marginTop: 4,
   },
-  statusOptions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  statusOption: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: '#F5F5F5',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-  },
-  statusOptionText: {
-    fontSize: 13,
-    color: '#666666',
-    fontWeight: '500',
-  },
-  statusOptionTextActive: {
-    color: '#FFFFFF',
+  statusReadOnly: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
   },
   textArea: {
     backgroundColor: '#F5F5F5',
@@ -656,6 +594,10 @@ const styles = StyleSheet.create({
     minHeight: 80,
     borderWidth: 1,
     borderColor: '#E0E0E0',
+  },
+  textAreaLocked: {
+    backgroundColor: '#E2E8F0',
+    color: '#475569',
   },
   completeButton: {
     flexDirection: 'row',
@@ -686,5 +628,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  lockedNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: '#E2E8F0',
+    marginBottom: 24,
+  },
+  lockedNoticeText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#475569',
   },
 });

@@ -155,6 +155,8 @@ class ConsultationAction(BaseModel):
     action: str; reschedule_date: Optional[str] = None; reschedule_time: Optional[str] = None; reason: Optional[str] = None
 class ConsultationUpdate(BaseModel):
     notes: Optional[str] = None; remarks: Optional[str] = None; status: Optional[str] = None; duration: Optional[int] = None
+class ConsultationComplete(BaseModel):
+    notes: Optional[str] = None
 class ChangePasswordRequest(BaseModel): current_password: str; new_password: str
 class AdminPasswordConfirmation(BaseModel):
     admin_password: str = Field(min_length=1, max_length=512)
@@ -510,12 +512,13 @@ async def request_action(request_id: str, payload: ConsultationAction, db: Async
     if not row: raise HTTPException(404, "Request not found")
     if payload.action == "accept":
         row.status = "accepted"
+        consultation = ConsultationRecord(faculty_school_id=faculty.school_id, student_id=row.student_id, student_name=row.student_name, student_program=row.student_program, topic=row.topic, date=row.preferred_date, time=row.preferred_time, status="ongoing", queue_id=row.queue_id, queue_number=row.queue_number, consultation_type=row.consultation_type)
         if row.queue_id:
             queue = await db.get(QueueRecord, row.queue_id)
             if queue:
-                queue.status = "completed"
-                await reset_queue_counter_if_empty(db, faculty.school_id)
-        db.add(ConsultationRecord(faculty_school_id=faculty.school_id, student_id=row.student_id, student_name=row.student_name, student_program=row.student_program, topic=row.topic, date=row.preferred_date, time=row.preferred_time, status="scheduled", queue_id=row.queue_id, queue_number=row.queue_number, consultation_type=row.consultation_type)); event = "consultation_accepted"
+                queue.status = "serving"
+        faculty.availability_status = "busy"
+        db.add(consultation); event = "consultation_started"
     elif payload.action == "decline":
         row.status = "declined"; row.decline_reason = payload.reason; event = "queue_updated"
         if row.queue_id:
@@ -561,12 +564,22 @@ async def consultation_detail(consultation_id: str, db: AsyncSession = Depends(s
 async def consultation_update(consultation_id: str, payload: ConsultationUpdate, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
     row = await db.scalar(select(ConsultationRecord).where(and_(ConsultationRecord.id == consultation_id, ConsultationRecord.faculty_school_id == faculty.school_id)))
     if not row: raise HTTPException(404, "Consultation not found")
+    if row.status in {"completed", "cancelled"}:
+        raise HTTPException(409, "Completed or cancelled consultations cannot be edited")
+    if payload.status is not None:
+        raise HTTPException(422, "Use the session actions to change consultation status")
     for key, value in payload.model_dump(exclude_none=True).items(): setattr(row, key, value)
     row.updated_at = now(); await db.commit(); return serialize(row)
 @api.post("/consultations/{consultation_id}/start")
 async def consultation_start(consultation_id: str, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
     row = await db.scalar(select(ConsultationRecord).where(and_(ConsultationRecord.id == consultation_id, ConsultationRecord.faculty_school_id == faculty.school_id)))
     if not row: raise HTTPException(404, "Consultation not found")
+    if row.status in {"completed", "cancelled"}:
+        raise HTTPException(409, "Completed or cancelled consultations cannot be started")
+    if row.status == "ongoing":
+        return {"message": "Consultation is already ongoing", "status": "ongoing"}
+    if row.status != "scheduled":
+        raise HTTPException(409, "Only scheduled consultations can be started")
     row.status = "ongoing"; row.updated_at = now(); faculty.availability_status = "busy"
     if row.queue_id:
         queue = await db.get(QueueRecord, row.queue_id)
@@ -575,9 +588,14 @@ async def consultation_start(consultation_id: str, db: AsyncSession = Depends(se
     for event in ("consultation_started", "queue_updated", "availability_changed"): await connections.send(event, {"faculty_id": faculty.school_id})
     return {"message": "Consultation started", "status": "ongoing"}
 @api.post("/consultations/{consultation_id}/complete")
-async def consultation_complete(consultation_id: str, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
+async def consultation_complete(consultation_id: str, payload: Optional[ConsultationComplete] = None, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
     row = await db.scalar(select(ConsultationRecord).where(and_(ConsultationRecord.id == consultation_id, ConsultationRecord.faculty_school_id == faculty.school_id)))
     if not row: raise HTTPException(404, "Consultation not found")
+    if row.status in {"completed", "cancelled"}:
+        raise HTTPException(409, "Completed or cancelled consultations cannot be completed again")
+    if row.status != "ongoing":
+        raise HTTPException(409, "Start the consultation before completing it")
+    if payload and payload.notes is not None: row.notes = payload.notes
     row.duration = max(1, int((now() - row.updated_at).total_seconds() / 60)); row.status = "completed"; row.updated_at = now(); faculty.availability_status = "available"
     if row.queue_id:
         queue = await db.get(QueueRecord, row.queue_id)

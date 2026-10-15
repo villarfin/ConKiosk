@@ -239,9 +239,7 @@ class TestStartComplete:
         assert pending, "kiosk-created request not found in pending list"
         req_id = pending[0]["_id"]
 
-        # NOTE: /action accept path in server.py does NOT copy queue_id to the consultation.
-        # We'll test the ideal flow by accepting via action AND then also patching queue_id
-        # onto the consultation for start/complete queue linkage validation.
+        # Accepting starts the consultation immediately and retains its queue linkage.
         ra = api_client.post(
             f"{BASE_URL}/api/consultation-requests/{req_id}/action",
             json={"action": "accept"}, headers=headers,
@@ -250,20 +248,13 @@ class TestStartComplete:
 
         # Find the consultation we just created for this faculty & student
         rc = api_client.get(
-            f"{BASE_URL}/api/consultations?status=scheduled&search=John Dela Cruz",
+            f"{BASE_URL}/api/consultations?status=ongoing&search=John Dela Cruz",
             headers=headers,
         )
         assert rc.status_code == 200
         consults = [c for c in rc.json() if c["topic"] == "TEST_start_complete_flow"]
         assert consults, "consultation not created after accept"
         consultation_id = consults[0]["_id"]
-
-        # Patch queue_id onto the consultation so start/complete can update the queue.
-        # (This mimics what a proper accept-of-kiosk-request would ideally do.)
-        # Since PATCH /consultations only allows certain fields, we do this in a lightweight
-        # way by reading/writing via Mongo would require server-side support.
-        # Instead: we'll TEST that start/complete work correctly regardless, and separately
-        # verify queue linkage using a direct queue status check by faculty availability.
 
         return {
             "faculty_id": faculty_id,
@@ -319,12 +310,12 @@ class TestStartComplete:
         headers = fresh_kiosk_flow["headers"]
         consultation_id = fresh_kiosk_flow["consultation_id"]
 
-        # start first
+        # The request was already started by accepting it; this remains safe for legacy flows.
         api_client.post(f"{BASE_URL}/api/consultations/{consultation_id}/start",
                         headers=headers)
 
         r = api_client.post(f"{BASE_URL}/api/consultations/{consultation_id}/complete",
-                            headers=headers)
+                            json={"notes": "Saved when completing the session"}, headers=headers)
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["message"] == "Consultation completed"
@@ -335,6 +326,14 @@ class TestStartComplete:
                             headers=headers)
         assert rc.status_code == 200
         assert rc.json()["status"] == "completed"
+        assert rc.json()["notes"] == "Saved when completing the session"
+
+        # Completed consultations are immutable, including their notes and status.
+        locked = api_client.patch(
+            f"{BASE_URL}/api/consultations/{consultation_id}",
+            json={"notes": "This must not replace saved notes"}, headers=headers,
+        )
+        assert locked.status_code == 409, locked.text
 
         # Verify faculty back to available
         rp = api_client.get(f"{BASE_URL}/api/faculty/profile", headers=headers)
