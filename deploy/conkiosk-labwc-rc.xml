@@ -4,12 +4,12 @@
   <windowRules>
     <windowRule identifier="conkiosk-kiosk">
       <fixedPosition>yes</fixedPosition>
-      <action name="MoveTo" x="1920" y="0" />
+      <action name="MoveTo" x="0" y="0" />
       <action name="ResizeTo" width="1920" height="1200" />
     </windowRule>
     <windowRule identifier="conkiosk-tv">
       <fixedPosition>yes</fixedPosition>
-      <action name="MoveTo" x="0" y="0" />
+      <action name="MoveTo" x="1920" y="0" />
       <action name="ResizeTo" width="1920" height="1200" />
     </windowRule>
   </windowRules>
