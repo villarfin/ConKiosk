@@ -23,6 +23,18 @@ output_enabled() {
   '
 }
 
+# Chromium on this Labwc build opens new fullscreen windows on the output that
+# contains the focused pointer. Move the virtual pointer to the far edge of
+# the extended desktop before each launch: left is HDMI1, right is HDMI2.
+# This is more reliable here than Chromium's X11-only --class placement.
+focus_hdmi1() {
+  command -v wlrctl >/dev/null 2>&1 && wlrctl pointer move -10000 0 >/dev/null 2>&1 || true
+}
+
+focus_hdmi2() {
+  command -v wlrctl >/dev/null 2>&1 && wlrctl pointer move 10000 0 >/dev/null 2>&1 || true
+}
+
 # Do not start a browser before the local server and kiosk display are ready.
 # The kiosk must still work if the TV has not been powered on or detected yet.
 ready=0
@@ -40,6 +52,7 @@ done
 # Labwc rules (conkiosk-labwc-rc.xml) place these classes on their HDMI outputs.
 # This script is run only by Labwc's single autostart entry. Do not use pgrep
 # here: it can match the launcher itself and prevent either window from opening.
+focus_hdmi1
 chromium $CHROMIUM_WAYLAND_FLAGS \
   --class=conkiosk-kiosk --kiosk --no-first-run --disable-session-crashed-bubble \
   --disable-infobars --user-data-dir="$KIOSK_PROFILE" "$KIOSK_URL" >/dev/null 2>&1 &
@@ -48,6 +61,7 @@ chromium $CHROMIUM_WAYLAND_FLAGS \
 # the kiosk hostage while doing so.
 for _ in $(seq 1 30); do
   if output_enabled HDMI-A-2; then
+    focus_hdmi2
     chromium $CHROMIUM_WAYLAND_FLAGS \
       --class=conkiosk-tv --kiosk --autoplay-policy=no-user-gesture-required --no-first-run --disable-session-crashed-bubble \
       --disable-infobars --user-data-dir="$TV_PROFILE" "$TV_URL" >/dev/null 2>&1 &
