@@ -10,7 +10,9 @@ KIOSK_PROFILE="$HOME/.local/share/conkiosk-kiosk-browser"
 TV_PROFILE="$HOME/.local/share/conkiosk-tv-browser"
 # Required for Chromium on Wayland to request Squeekboard for focused text
 # inputs. Without this, the on-screen keyboard can disappear in --kiosk mode.
-CHROMIUM_WAYLAND_FLAGS="--ozone-platform=wayland --enable-features=UseOzonePlatform --enable-wayland-ime --wayland-text-input-version=3"
+# ConKiosk screens do not store user credentials. Avoid GNOME Keyring so a
+# kiosk boot never opens an "Unlock Keyring" dialog.
+CHROMIUM_WAYLAND_FLAGS="--ozone-platform=wayland --enable-features=UseOzonePlatform --enable-wayland-ime --wayland-text-input-version=3 --password-store=basic"
 
 mkdir -p "$KIOSK_PROFILE" "$TV_PROFILE"
 
