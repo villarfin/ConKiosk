@@ -17,7 +17,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { apiUrl } from '@/src/config/api';
 import { setKioskDraft } from '@/src/utils/kiosk-draft';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import KioskTouchKeyboard from '@/src/components/KioskTouchKeyboard';
 
 
 // USTP–CDO programs recognized from QR content. The text shown to the student
@@ -93,7 +92,6 @@ export default function IdentifyScreen() {
   const [yearPickerVisible, setYearPickerVisible] = useState(false);
   const [sectionPickerVisible, setSectionPickerVisible] = useState(false);
   const [customSection, setCustomSection] = useState(false);
-  const [keyboardField, setKeyboardField] = useState<keyof Student | null>(null);
   const scanInputRef = useRef<TextInput>(null);
   const scanBufferRef = useRef('');
   const isScanInputFocusedRef = useRef(false);
@@ -104,12 +102,6 @@ export default function IdentifyScreen() {
     || !currentStudent.section.trim();
   const sectionOptions = sectionOptionsForProgram(currentStudent.program);
   const sectionMustBeTyped = customSection || sectionOptions.length === 0;
-  const typeWithTouchKeyboard = (key: string) => {
-    if (!keyboardField) return;
-    const current = currentStudent[keyboardField];
-    const next = key === 'BACKSPACE' ? current.slice(0, -1) : key === 'CLEAR' ? '' : `${current}${key}`;
-    setCurrentStudent({ ...currentStudent, [keyboardField]: next });
-  };
 
   // Keep QR scanner input focused (USB QR scanner acts like keyboard)
   useEffect(() => {
@@ -362,7 +354,6 @@ export default function IdentifyScreen() {
                 placeholder="e.g., STU2024101"
                 value={currentStudent.student_id}
                 onChangeText={(v) => setCurrentStudent({ ...currentStudent, student_id: v })}
-                onFocus={() => setKeyboardField('student_id')}
                 autoCapitalize="characters"
               />
               {!currentStudent.student_id.trim() && <Text style={styles.fieldRequiredText}>Student ID Number is required.</Text>}
@@ -376,7 +367,6 @@ export default function IdentifyScreen() {
                 placeholder="e.g., John Dela Cruz"
                 value={currentStudent.full_name}
                 onChangeText={(v) => setCurrentStudent({ ...currentStudent, full_name: v })}
-                onFocus={() => setKeyboardField('full_name')}
               />
               {!currentStudent.full_name.trim() && <Text style={styles.fieldRequiredText}>Full Name is required.</Text>}
             </View>
@@ -389,7 +379,6 @@ export default function IdentifyScreen() {
                 placeholder="e.g., BSCS"
                 value={currentStudent.program}
                 onChangeText={(v) => setCurrentStudent({ ...currentStudent, program: v })}
-                onFocus={() => setKeyboardField('program')}
                 autoCapitalize="characters"
               />
               {!currentStudent.program.trim() && <Text style={styles.fieldRequiredText}>Program is required.</Text>}
@@ -418,7 +407,6 @@ export default function IdentifyScreen() {
                   placeholder="Type your section"
                   value={currentStudent.section}
                   onChangeText={(v) => setCurrentStudent({ ...currentStudent, section: v })}
-                  onFocus={() => setKeyboardField('section')}
                   autoCapitalize="characters"
                 /> : <TouchableOpacity
                   testID="input-section"
@@ -516,7 +504,6 @@ export default function IdentifyScreen() {
           </View>
         </View>
       </Modal>
-      <KioskTouchKeyboard visible={Boolean(keyboardField)} onKey={typeWithTouchKeyboard} onClose={() => setKeyboardField(null)} />
     </SafeAreaView>
   );
 }

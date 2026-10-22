@@ -32,6 +32,7 @@ interface ConsultationRequest {
   preferred_time: string;
   status: string;
   created_at: string;
+  queue_number?: number;
   student_names?: string[];
   student_ids?: string[];
 }
@@ -76,7 +77,7 @@ export default function RequestsScreen() {
   const loadRequests = async () => {
     try {
       const data = await ApiClient.get('/consultation-requests?status=pending');
-      setRequests(data);
+      setRequests([...data].sort((first, second) => (first.queue_number ?? Number.MAX_SAFE_INTEGER) - (second.queue_number ?? Number.MAX_SAFE_INTEGER) || first.created_at.localeCompare(second.created_at) || first._id.localeCompare(second._id)));
     } catch (error: any) {
       console.error('Error loading requests:', error);
       Alert.alert('Error', 'Failed to load consultation requests');

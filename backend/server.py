@@ -844,7 +844,10 @@ async def requests(status: Optional[str] = None, db: AsyncSession = Depends(sess
     query = select(ConsultationRequestRecord).where(ConsultationRequestRecord.faculty_school_id == faculty.school_id)
     if status: query = query.where(ConsultationRequestRecord.status == status)
     output = []
-    for row in (await db.scalars(query.order_by(ConsultationRequestRecord.created_at.desc()))).all():
+    # Pending consultations are served first-come, first-served. Queue numbers
+    # are allocated atomically at kiosk submission, so they are the authoritative
+    # order even when two requests arrive almost simultaneously.
+    for row in (await db.scalars(query.order_by(ConsultationRequestRecord.queue_number.asc().nullslast(), ConsultationRequestRecord.created_at.asc(), ConsultationRequestRecord.id.asc()))).all():
         item = serialize(row)
         if row.queue_id:
             queue = await db.get(QueueRecord, row.queue_id)
@@ -869,6 +872,14 @@ async def request_action(request_id: str, payload: ConsultationAction, db: Async
     if not row: raise HTTPException(404, "Request not found")
     if row.status != 'pending': raise HTTPException(409, 'This request has already been processed. Refresh your requests.')
     if payload.action == "accept":
+        first_pending = await db.scalar(
+            select(ConsultationRequestRecord.id)
+            .where(and_(ConsultationRequestRecord.faculty_school_id == faculty.school_id, ConsultationRequestRecord.status == 'pending'))
+            .order_by(ConsultationRequestRecord.queue_number.asc().nullslast(), ConsultationRequestRecord.created_at.asc(), ConsultationRequestRecord.id.asc())
+            .limit(1)
+        )
+        if first_pending != row.id:
+            raise HTTPException(409, 'Accept the first pending request before accepting a later request.')
         row.status = "accepted"
         consultation = ConsultationRecord(faculty_school_id=faculty.school_id, student_id=row.student_id, student_name=row.student_name, student_program=row.student_program, topic=row.topic, date=row.preferred_date, time=row.preferred_time, status="scheduled", queue_id=row.queue_id, queue_number=row.queue_number, consultation_type=row.consultation_type)
         if row.queue_id:
