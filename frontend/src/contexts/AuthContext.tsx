@@ -86,6 +86,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(timer);
   }, [isAuthenticated, token]);
 
+  // The server uses this authenticated heartbeat to distinguish a signed-in
+  // faculty device from an unknown device on the LAN. It is deliberately not
+  // a replacement for internet push or router client telemetry.
+  useEffect(() => {
+    if (!isAuthenticated || !token) return;
+    const heartbeat = () => { void timedFetch(apiUrl('/faculty/presence'), { method: 'POST', headers: { Authorization: `Bearer ${token}` }, timeoutMs: 6000 }).catch(() => {}); };
+    heartbeat();
+    const timer = setInterval(heartbeat, 30_000);
+    return () => clearInterval(timer);
+  }, [isAuthenticated, token]);
+
   const initializeAuth = async () => {
     try {
       const storedToken = await storage.secureGet('auth_token', null);

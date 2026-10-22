@@ -138,8 +138,8 @@ export default function ProfileScreen() {
       return;
     }
 
-    if (newPassword.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+    if (newPassword.length < 12) {
+      Alert.alert('Error', 'Password must be at least 12 characters');
       return;
     }
 

@@ -96,7 +96,6 @@ static address outside the router's dynamic pool. Disable AP/client isolation.
 New faculty registrations remain pending until approved. Approval/rejection and
 role transfers require confirmation. Destructive account operations additionally
 require the current administrator password, checked by the backend.
-
 ## Consultation workflow
 
 1. A student selects a faculty member accepting consultations at `/kiosk`.

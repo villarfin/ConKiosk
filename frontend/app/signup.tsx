@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { apiUrl } from '@/src/config/api';
+import { ScheduleEditor, ScheduleEntry } from '@/src/components/ScheduleEditor';
 
 
 export default function SignupScreen() {
@@ -14,17 +15,19 @@ export default function SignupScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [privacyAcknowledged, setPrivacyAcknowledged] = useState(false);
   const [privacyVisible, setPrivacyVisible] = useState(false);
+  const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
   const set = (key: keyof typeof form, value: string) => setForm({ ...form, [key]: value });
 
   const register = async () => {
     const { confirmPassword, ...payload } = form;
+    payload.office_hours = schedules.length ? schedules.map(x => `${x.day.slice(0, 3)} ${x.start}-${x.end}`).join(', ') : 'Not specified';
     if (Object.values(payload).some((value) => !value.trim())) return Alert.alert('Missing information', 'Please complete all fields.');
-    if (payload.password.length < 8) return Alert.alert('Password too short', 'Use at least 8 characters.');
+    if (payload.password.length < 12) return Alert.alert('Password too short', 'Use at least 12 characters.');
     if (payload.password !== confirmPassword) return Alert.alert('Passwords do not match', 'Please enter the same password twice.');
     if (!privacyAcknowledged) return Alert.alert('Privacy acknowledgment required', 'Please read and acknowledge the Privacy Notice before registering.');
     setLoading(true);
     try {
-      const response = await timedFetch(apiUrl('/auth/signup'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, privacy_acknowledged: privacyAcknowledged, privacy_version: '1' }), timeoutMs: 15000 });
+      const response = await timedFetch(apiUrl('/auth/signup'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, class_schedules: schedules, privacy_acknowledged: privacyAcknowledged, privacy_version: '1' }), timeoutMs: 15000 });
       const body = await response.json();
       if (!response.ok) throw new Error(body.detail || 'Could not create the account.');
       router.replace('/login?registration=submitted');
@@ -33,10 +36,10 @@ export default function SignupScreen() {
     } finally { setLoading(false); }
   };
 
-  const field = (label: string, key: keyof typeof form, props: any = {}) => <View style={styles.field}><Text style={styles.label}>{label}</Text><TextInput style={styles.input} value={form[key]} onChangeText={(value) => set(key, value)} editable={!loading} placeholder={props.placeholder} autoCapitalize={props.autoCapitalize || 'words'} secureTextEntry={props.secureTextEntry} keyboardType={props.keyboardType} /></View>;
+  const field = (label: string, key: keyof typeof form, props: any = {}) => <View style={styles.field}><Text style={styles.label}>{label}</Text>{key === 'office_hours' ? <ScheduleEditor value={schedules} onChange={setSchedules} /> : <TextInput style={styles.input} value={form[key]} onChangeText={(value) => set(key, value)} editable={!loading} placeholder={props.placeholder} autoCapitalize={props.autoCapitalize || 'words'} secureTextEntry={props.secureTextEntry} keyboardType={props.keyboardType} />}</View>;
   const passwordsMatch = Boolean(form.confirmPassword) && form.password === form.confirmPassword;
   const passwordsDiffer = Boolean(form.confirmPassword) && !passwordsMatch;
-  const passwordField = (label: string, key: 'password' | 'confirmPassword', placeholder: string) => <View style={styles.field}><Text style={styles.label}>{label}</Text><View style={[styles.passwordRow, passwordsDiffer && key === 'confirmPassword' && styles.inputError, passwordsMatch && key === 'confirmPassword' && styles.inputSuccess]}><TextInput style={styles.passwordInput} value={form[key]} onChangeText={(value) => set(key, value)} editable={!loading} placeholder={placeholder} autoCapitalize="none" autoCorrect={false} secureTextEntry={!showPassword} /><TouchableOpacity accessibilityRole="button" accessibilityLabel={showPassword ? 'Hide password' : 'Show password'} onPress={() => setShowPassword(!showPassword)} style={styles.passwordToggle}><Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={21} color="#475569" /></TouchableOpacity></View>{key === 'password' && <Text style={styles.passwordHint}>Use at least 8 characters.</Text>}{key === 'confirmPassword' && passwordsMatch && <Text accessibilityLiveRegion="polite" style={styles.match}>Passwords match.</Text>}{key === 'confirmPassword' && passwordsDiffer && <Text accessibilityLiveRegion="polite" style={styles.noMatch}>Passwords do not match.</Text>}</View>;
+  const passwordField = (label: string, key: 'password' | 'confirmPassword', placeholder: string) => <View style={styles.field}><Text style={styles.label}>{label}</Text><View style={[styles.passwordRow, passwordsDiffer && key === 'confirmPassword' && styles.inputError, passwordsMatch && key === 'confirmPassword' && styles.inputSuccess]}><TextInput style={styles.passwordInput} value={form[key]} onChangeText={(value) => set(key, value)} editable={!loading} placeholder={placeholder} autoCapitalize="none" autoCorrect={false} secureTextEntry={!showPassword} /><TouchableOpacity accessibilityRole="button" accessibilityLabel={showPassword ? 'Hide password' : 'Show password'} onPress={() => setShowPassword(!showPassword)} style={styles.passwordToggle}><Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={21} color="#475569" /></TouchableOpacity></View>{key === 'password' && <Text style={styles.passwordHint}>Use at least 12 characters; a passphrase is accepted.</Text>}{key === 'confirmPassword' && passwordsMatch && <Text accessibilityLiveRegion="polite" style={styles.match}>Passwords match.</Text>}{key === 'confirmPassword' && passwordsDiffer && <Text accessibilityLiveRegion="polite" style={styles.noMatch}>Passwords do not match.</Text>}</View>;
 
   return <SafeAreaView style={styles.container}><KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"><TouchableOpacity onPress={() => router.back()} style={styles.back}><Ionicons name="arrow-back" size={22} color="#2196F3" /><Text style={styles.backText}>Back to sign in</Text></TouchableOpacity><Text style={styles.title}>Faculty registration</Text><Text style={styles.subtitle}>Set up your faculty consultation account.</Text>{field('School ID', 'school_id', { placeholder: 'e.g., FAC2024007', autoCapitalize: 'characters' })}{field('Full name', 'full_name', { placeholder: 'e.g., Dr. Jane Cruz' })}{field('Department', 'department', { placeholder: 'e.g., Computer Science' })}{field('Office location', 'office_location', { placeholder: 'e.g., Room 301' })}{field('Email address', 'email', { placeholder: 'name@school.edu', autoCapitalize: 'none', keyboardType: 'email-address' })}{field('Office hours', 'office_hours', { placeholder: 'e.g., Mon-Fri 9:00 AM - 5:00 PM' })}{passwordField('Password', 'password', 'At least 8 characters')}{passwordField('Confirm password', 'confirmPassword', 'Re-enter password')}<View style={styles.privacyBox}><TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: privacyAcknowledged }} accessibilityLabel="Acknowledge Privacy Notice" style={styles.checkboxRow} onPress={() => setPrivacyAcknowledged(!privacyAcknowledged)}><Ionicons name={privacyAcknowledged ? 'checkbox' : 'square-outline'} size={23} color={privacyAcknowledged ? '#1D4ED8' : '#475569'} /><Text style={styles.privacyText}>I have read and understood the Privacy Notice.</Text></TouchableOpacity><TouchableOpacity accessibilityRole="link" onPress={() => setPrivacyVisible(true)}><Text style={styles.privacyLink}>Read the Privacy Notice</Text></TouchableOpacity></View><TouchableOpacity style={[styles.button, (loading || !privacyAcknowledged) && styles.disabled]} onPress={register} disabled={loading || !privacyAcknowledged}>{loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Create faculty account</Text>}</TouchableOpacity></ScrollView></KeyboardAvoidingView><PrivacyNotice visible={privacyVisible} close={() => setPrivacyVisible(false)} /></SafeAreaView>;
 }

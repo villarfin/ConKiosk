@@ -27,16 +27,27 @@ const enableSound = async () => {
 const playTone = () => {
   const context = announcementAudioContext;
   if (!context || context.state !== 'running') return;
-  [0, 0.24].forEach((offset) => {
+  // A three-part, two-frequency alert is deliberately more noticeable than
+  // the old short chime in a busy hallway.
+  [0, 0.22, 0.44, 0.86, 1.08, 1.30].forEach((offset, index) => {
     const oscillator = context.createOscillator();
     const gain = context.createGain();
-    oscillator.frequency.value = offset ? 880 : 660;
+    oscillator.type = 'square';
+    oscillator.frequency.value = index % 2 ? 1320 : 880;
     gain.gain.setValueAtTime(0.0001, context.currentTime + offset);
-    gain.gain.exponentialRampToValueAtTime(0.16, context.currentTime + offset + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + offset + 0.2);
+    gain.gain.exponentialRampToValueAtTime(0.30, context.currentTime + offset + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + offset + 0.18);
     oscillator.connect(gain); gain.connect(context.destination);
-    oscillator.start(context.currentTime + offset); oscillator.stop(context.currentTime + offset + 0.21);
+    oscillator.start(context.currentTime + offset); oscillator.stop(context.currentTime + offset + 0.19);
   });
+};
+
+const speakQueue = (queueNumber: string) => {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window) || !queueNumber) return;
+  window.speechSynthesis.cancel();
+  const speech = new SpeechSynthesisUtterance(`Attention please. Queue number ${queueNumber}. Please proceed to your instructor.`);
+  speech.rate = 0.86; speech.pitch = 1; speech.volume = 1;
+  window.speechSynthesis.speak(speech);
 };
 
 export default function TVDisplay() {
@@ -63,8 +74,11 @@ export default function TVDisplay() {
       if (!response.ok) throw new Error(`TV status request failed: ${response.status}`);
       const result: FacultyStatus[] = await response.json();
       const current = new Map(result.filter(person => person.now_serving).map(person => [person.school_id, (person.now_serving as NowServing & { queue_id?: string }).queue_id || person.now_serving!.queue_number]));
-      if (previousServing.current && [...current].some(([id, number]) => previousServing.current!.get(id) !== number)) {
-        try { if (await enableSound()) { setSoundOn(true); playTone(); } } catch { setSoundOn(false); }
+      if (previousServing.current) {
+        const changed = [...current].find(([id, number]) => previousServing.current!.get(id) !== number);
+        if (changed) {
+          try { if (await enableSound()) { setSoundOn(true); playTone(); speakQueue(changed[1]); } } catch { setSoundOn(false); }
+        }
       }
       previousServing.current = current;
       setFaculty(result);
@@ -189,17 +203,17 @@ const styles = StyleSheet.create({
   profileCircle: { width: 56, height: 56, borderRadius: 28, borderWidth: 2, backgroundColor: '#172747', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 },
   profilePhoto: { width: '100%', height: '100%', resizeMode: 'cover' },
   facultyDetails: { flex: 1, minWidth: 0 },
-  facultyCardName: { color: '#172747', fontSize: 17, fontWeight: '800' },
+  facultyCardName: { color: '#172747', fontSize: 19, fontWeight: '800' },
   facultyOfficeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 },
   facultyCardOffice: { color: '#64748B', fontSize: 12, flexShrink: 1 },
   facultyStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 9 },
   facultyStatusText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
   queueEntries: { flex: 1, minHeight: 0, gap: 12 },
   queueEntry: { flex: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center', padding: 10, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E7DFC8', overflow: 'hidden' },
-  queueInstructor: { color: '#0F172A', fontSize: 20, fontWeight: '800', textAlign: 'center' },
+  queueInstructor: { color: '#0F172A', fontSize: 22, fontWeight: '800', textAlign: 'center' },
   queueNumberLabel: { color: '#8A681F', fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginTop: 8 },
   largeQueueNumber: { color: '#172747', fontSize: 72, lineHeight: 80, fontWeight: '900', textAlign: 'center', width: '100%', fontVariant: ['tabular-nums'] },
-  nextQueueLine: { color: '#334155', fontSize: 16, fontWeight: '700', marginTop: 4 },
+  nextQueueLine: { color: '#334155', fontSize: 18, fontWeight: '700', marginTop: 4 },
   facultyArea: { flex: 1, padding: 20, overflow: 'hidden' }, facultyGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 18 }, facultyTile: { width: '47%', flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, backgroundColor: '#FFFFFF', borderRadius: 12, borderLeftWidth: 6, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } }, availabilityDot: { width: 7, height: 7, borderRadius: 4 },
   queueCard: { alignSelf: 'stretch', margin: 12, flexShrink: 0, backgroundColor: '#F4F1E9', borderRadius: 16, overflow: 'hidden', padding: 14, borderWidth: 2, borderColor: '#C8A348' }, queueTitle: { fontSize: 18, fontWeight: '900', color: '#172747', marginBottom: 10 }, queueTableHeading: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 2, borderBottomColor: '#CBD5E1', paddingBottom: 8 }, queueHeadingText: { fontSize: 9, fontWeight: '800', color: '#475569' }, queueTableRow: { height: 72, flexDirection: 'row', alignItems: 'center', gap: 8, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' }, tableQueueNumber: { color: '#172747', fontSize: 29, fontWeight: '900' }, tableNext: { color: '#475569', fontSize: 10, maxWidth: 155 }, queueCardFooter: { color: '#475569', fontSize: 10, paddingTop: 8 },
   container: { flex: 1, backgroundColor: '#101D35', overflow: 'hidden' }, loading: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#101D35' },

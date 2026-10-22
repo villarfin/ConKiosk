@@ -77,6 +77,9 @@ class Faculty(Base):
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default='false')
     privacy_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     privacy_acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    class_schedules: Mapped[list] = mapped_column(JSON, default=list)
+    presence_last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    presence_restore_available: Mapped[bool] = mapped_column(Boolean, default=False, server_default='false')
 
 class StudentRecord(Base):
     __tablename__ = "students"
@@ -188,7 +191,7 @@ class BaseModel(PydanticBaseModel):
             if not isinstance(value, str): continue
             if 'password' in key:
                 if not value or len(value.encode('utf-8')) > 72: raise ValueError('Passwords must contain 1–72 UTF-8 bytes')
-                if key in {'new_password', 'password'} and type(self).__name__ != 'LoginRequest' and len(value) < 8: raise ValueError('Use at least 8 characters for the new password')
+                if key in {'new_password', 'password'} and type(self).__name__ != 'LoginRequest' and len(value) < 12: raise ValueError('Use at least 12 characters for the new password')
                 continue
             if len(value) > limits.get(key, 255): raise ValueError(f'{key} is too long')
             if key not in {'notes', 'remarks', 'profile_image', 'reason'}:
@@ -234,11 +237,12 @@ class FacultySignup(BaseModel):
     office_location: str
     email: str
     office_hours: str
+    class_schedules: list[dict] = Field(default_factory=list, max_length=30)
     privacy_acknowledged: bool = False
     privacy_version: str = '1'
 class FacultyProfileUpdate(BaseModel):
     full_name: Optional[str] = None; department: Optional[str] = None; office_location: Optional[str] = None
-    email: Optional[str] = None; profile_image: Optional[str] = None; office_hours: Optional[str] = None
+    email: Optional[str] = None; profile_image: Optional[str] = None; office_hours: Optional[str] = None; class_schedules: Optional[list[dict]] = None
 class AvailabilityUpdate(BaseModel): status: str; accepting_consultations: Optional[bool] = None
 class ConsultationAction(BaseModel):
     action: str; reschedule_date: Optional[str] = None; reschedule_time: Optional[str] = None; reason: Optional[str] = None
@@ -270,6 +274,26 @@ class AdminFacultyUpdate(BaseModel):
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
+
+SCHEDULE_DAYS = {'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'}
+def validate_schedules(entries: list[dict]) -> list[dict]:
+    """Normalize schedule entries and reject malformed/overlapping periods."""
+    normalized = []
+    for item in entries:
+        if not isinstance(item, dict): raise HTTPException(422, 'Each class schedule must be an object')
+        day, start, end = str(item.get('day', '')).strip(), str(item.get('start', '')).strip(), str(item.get('end', '')).strip()
+        if day not in SCHEDULE_DAYS or not re.fullmatch(r'([01]\d|2[0-3]):[0-5]\d', start) or not re.fullmatch(r'([01]\d|2[0-3]):[0-5]\d', end):
+            raise HTTPException(422, 'Choose a valid class day, start time, and end time')
+        if start >= end: raise HTTPException(422, 'A class must end after it starts')
+        normalized.append({'day': day, 'start': start, 'end': end})
+    for day in SCHEDULE_DAYS:
+        periods = sorted((entry for entry in normalized if entry['day'] == day), key=lambda entry: entry['start'])
+        if any(current['start'] < previous['end'] for previous, current in zip(periods, periods[1:])):
+            raise HTTPException(422, f'Class schedules overlap on {day}')
+    return normalized
+
+def schedule_summary(entries: list[dict]) -> str:
+    return ', '.join(f"{entry['day'][:3]} {entry['start']}–{entry['end']}" for entry in entries)
 def serialize(record: Any, secret: bool = False) -> dict:
     values = {column.name: getattr(record, column.name) for column in record.__table__.columns}
     values["_id"] = values.pop("id")
@@ -349,12 +373,27 @@ class Connections:
     def remove(self, ws: WebSocket, faculty_id: Optional[str]):
         self.all.discard(ws)
         if faculty_id: self.faculty.get(faculty_id, set()).discard(ws)
+        # Start the grace period at the authenticated app's server disconnect.
+        if faculty_id: asyncio.create_task(mark_faculty_disconnected(faculty_id))
     async def send(self, event: str, data: dict, faculty_id: Optional[str] = None):
         sockets = self.faculty.get(faculty_id, set()) if faculty_id else self.all
         for ws in list(sockets):
             try: await ws.send_json({"type": event, "data": data})
             except Exception: self.remove(ws, faculty_id)
 connections = Connections()
+
+async def mark_faculty_disconnected(faculty_school_id: str):
+    """After a continuous 100-second app-server disconnect, mark Available offline."""
+    await asyncio.sleep(100)
+    if connections.faculty.get(faculty_school_id): return
+    async with SessionLocal() as db:
+        faculty = await db.scalar(select(Faculty).where(Faculty.school_id == faculty_school_id))
+        if not faculty or faculty.availability_status != 'available': return
+        faculty.availability_status = 'unavailable'
+        faculty.accepting_consultations = False
+        faculty.presence_restore_available = True
+        await db.commit()
+        await connections.send('availability_changed', {'faculty_id': faculty.school_id, 'status': 'unavailable', 'accepting_consultations': False})
 
 app = FastAPI(); api = APIRouter(prefix="/api")
 @app.exception_handler(RequestValidationError)
@@ -404,6 +443,9 @@ async def startup():
         await conn.execute(text("ALTER TABLE faculty ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT false"))
         await conn.execute(text("ALTER TABLE faculty ADD COLUMN IF NOT EXISTS privacy_version VARCHAR(64) NULL"))
         await conn.execute(text("ALTER TABLE faculty ADD COLUMN IF NOT EXISTS privacy_acknowledged_at TIMESTAMP NULL"))
+        await conn.execute(text("ALTER TABLE faculty ADD COLUMN IF NOT EXISTS class_schedules JSON NOT NULL DEFAULT '[]'"))
+        await conn.execute(text("ALTER TABLE faculty ADD COLUMN IF NOT EXISTS presence_last_seen TIMESTAMP NULL"))
+        await conn.execute(text("ALTER TABLE faculty ADD COLUMN IF NOT EXISTS presence_restore_available BOOLEAN NOT NULL DEFAULT false"))
         await conn.execute(text("ALTER TABLE consultations ADD COLUMN IF NOT EXISTS students JSON NOT NULL DEFAULT '[]'"))
         await conn.execute(text("ALTER TABLE students ADD COLUMN IF NOT EXISTS roster_verified BOOLEAN NOT NULL DEFAULT false"))
         await conn.execute(text("ALTER TABLE queue ADD COLUMN IF NOT EXISTS student_details JSON NOT NULL DEFAULT '[]'"))
@@ -459,6 +501,24 @@ async def startup():
             else:
                 admin.role = "admin"
             await db.commit()
+
+    # Presence is intentionally authenticated and conservative.  It is a
+    # fallback for routers (including the deployed Tenda) that do not expose a
+    # usable client-presence API.  A missing heartbeat only changes an account
+    # which was previously available; Busy/manual-Unavailable states are kept.
+    async def presence_watchdog():
+        while True:
+            await asyncio.sleep(30)
+            cutoff = now() - timedelta(seconds=100)
+            async with SessionLocal() as db:
+                rows = (await db.scalars(select(Faculty).where(and_(Faculty.presence_last_seen.is_not(None), Faculty.presence_last_seen < cutoff, Faculty.availability_status == 'available')))).all()
+                for faculty in rows:
+                    faculty.availability_status = 'unavailable'
+                    faculty.accepting_consultations = False
+                    faculty.presence_restore_available = True
+                    await connections.send('availability_changed', {'faculty_id': faculty.school_id, 'status': 'unavailable', 'accepting_consultations': False})
+                if rows: await db.commit()
+    asyncio.create_task(presence_watchdog())
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket, faculty_id: Optional[str] = None):
     # Public displays may subscribe without a faculty id.  Faculty-specific
@@ -471,6 +531,12 @@ async def ws_endpoint(websocket: WebSocket, faculty_id: Optional[str] = None):
             async with SessionLocal() as db:
                 account = await authenticate_token(frame.get('token', ''), db)
                 if account.school_id != faculty_id: raise HTTPException(401)
+                account.presence_last_seen = now()
+                if account.presence_restore_available and account.availability_status == 'unavailable':
+                    account.availability_status, account.accepting_consultations = 'available', True
+                    account.presence_restore_available = False
+                    await connections.send('availability_changed', {'faculty_id': account.school_id, 'status': 'available', 'accepting_consultations': True})
+                await db.commit()
         except (HTTPException, asyncio.TimeoutError, ValueError, WebSocketDisconnect):
             await websocket.close(code=1008)
             return
@@ -513,10 +579,11 @@ async def signup(payload: FacultySignup, db: AsyncSession = Depends(session)):
     if not all(required_fields): raise HTTPException(422, "All registration fields are required")
     if not payload.privacy_acknowledged: raise HTTPException(422, 'Please acknowledge the Privacy Notice')
     if payload.privacy_version != '1': raise HTTPException(422, 'Please refresh and read the current Privacy Notice')
-    if len(payload.password) < 8: raise HTTPException(422, "Password must be at least 8 characters")
+    if len(payload.password) < 12: raise HTTPException(422, "Password must be at least 12 characters")
     if "@" not in payload.email: raise HTTPException(422, "Enter a valid email address")
     if await db.scalar(select(Faculty).where(Faculty.school_id == school_id)) or await db.get(RetiredFacultyID, school_id):
         raise HTTPException(409, "A faculty account with this School ID already exists")
+    schedules = validate_schedules(payload.class_schedules)
     faculty = Faculty(
         school_id=school_id,
         password_hash=pwd_context.hash(payload.password),
@@ -524,7 +591,7 @@ async def signup(payload: FacultySignup, db: AsyncSession = Depends(session)):
         department=payload.department.strip(),
         office_location=payload.office_location.strip(),
         email=payload.email.strip().lower(),
-        office_hours=payload.office_hours.strip(),
+        office_hours=schedule_summary(schedules) or payload.office_hours.strip(), class_schedules=schedules,
         availability_status="unavailable",
         is_approved=False,
         privacy_version=payload.privacy_version,
@@ -541,7 +608,11 @@ async def signup(payload: FacultySignup, db: AsyncSession = Depends(session)):
 async def profile(faculty: Faculty = Depends(current_faculty)): return serialize(faculty, True)
 @api.patch("/faculty/profile")
 async def update_profile(payload: FacultyProfileUpdate, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
-    for key, value in payload.model_dump(exclude_none=True).items(): setattr(faculty, key, value)
+    changes = payload.model_dump(exclude_none=True)
+    if 'class_schedules' in changes:
+        changes['class_schedules'] = validate_schedules(changes['class_schedules'])
+        changes['office_hours'] = schedule_summary(changes['class_schedules']) or changes.get('office_hours', faculty.office_hours)
+    for key, value in changes.items(): setattr(faculty, key, value)
     await db.commit(); await db.refresh(faculty); return serialize(faculty, True)
 @api.patch("/faculty/availability")
 async def availability(payload: AvailabilityUpdate, db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
@@ -550,12 +621,23 @@ async def availability(payload: AvailabilityUpdate, db: AsyncSession = Depends(s
         raise HTTPException(409, 'Complete the active consultation before changing availability')
     if payload.status not in {"available", "busy", "unavailable"}: raise HTTPException(422, "Invalid availability status")
     faculty.availability_status = payload.status
+    faculty.presence_restore_available = False
     faculty.accepting_consultations = (payload.status == "available") if payload.accepting_consultations is None else payload.accepting_consultations
     if payload.status == "unavailable": faculty.accepting_consultations = False
     await db.commit()
     event = {"faculty_id": faculty.school_id, "status": faculty.availability_status, "accepting_consultations": faculty.accepting_consultations}
     await connections.send("availability_changed", event)
     return {"message": "Availability updated", "status": faculty.availability_status, "accepting_consultations": faculty.accepting_consultations}
+@api.post('/faculty/presence')
+async def faculty_presence(db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty)):
+    """Authenticated app heartbeat; no router credentials or device MACs are used."""
+    faculty.presence_last_seen = now()
+    if faculty.presence_restore_available and faculty.availability_status == 'unavailable':
+        faculty.availability_status, faculty.accepting_consultations = 'available', True
+        faculty.presence_restore_available = False
+        await connections.send('availability_changed', {'faculty_id': faculty.school_id, 'status': 'available', 'accepting_consultations': True})
+    await db.commit()
+    return {'status': faculty.availability_status}
 @api.post("/auth/logout")
 async def logout(db: AsyncSession = Depends(session), faculty: Faculty = Depends(current_faculty), credentials: HTTPAuthorizationCredentials = Depends(security)):
     await lock_faculty_queue(db, faculty)
