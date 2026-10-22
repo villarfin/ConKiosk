@@ -44,6 +44,17 @@ const QR_PROGRAMS: Array<[string, string]> = [
   ['BTLE', 'BTLE'], ['BTVTE', 'BTVTE'],
 ];
 const YEAR_LEVELS = ['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year'];
+const IT_SECTIONS = Array.from({ length: 18 }, (_, index) => `R${index + 1}`);
+const TCM_SECTIONS = Array.from({ length: 15 }, (_, index) => `K${index + 1}`);
+const CS_SECTIONS = 'ABCDEFGHIJK'.split('');
+
+const sectionOptionsForProgram = (program: string) => {
+  const normalized = program.toUpperCase();
+  if (normalized.includes('INFORMATION TECHNOLOGY') || normalized.includes('BSIT')) return IT_SECTIONS;
+  if (normalized.includes('TECHNOLOGY COMMUNICATION MANAGEMENT') || normalized.includes('TCM')) return TCM_SECTIONS;
+  if (normalized.includes('COMPUTER SCIENCE') || normalized.includes('BSCS')) return CS_SECTIONS;
+  return [];
+};
 
 const detectProgram = (qrContent: string) => {
   const normalizedContent = qrContent.toUpperCase();
@@ -79,6 +90,8 @@ export default function IdentifyScreen() {
   const [scanInput, setScanInput] = useState('');
   const [lookingUp, setLookingUp] = useState(false);
   const [yearPickerVisible, setYearPickerVisible] = useState(false);
+  const [sectionPickerVisible, setSectionPickerVisible] = useState(false);
+  const [customSection, setCustomSection] = useState(false);
   const scanInputRef = useRef<TextInput>(null);
   const scanBufferRef = useRef('');
   const isScanInputFocusedRef = useRef(false);
@@ -87,6 +100,8 @@ export default function IdentifyScreen() {
     || !currentStudent.program.trim()
     || !currentStudent.year_level.trim()
     || !currentStudent.section.trim();
+  const sectionOptions = sectionOptionsForProgram(currentStudent.program);
+  const sectionMustBeTyped = customSection || sectionOptions.length === 0;
 
   // Keep QR scanner input focused (USB QR scanner acts like keyboard)
   useEffect(() => {
@@ -97,6 +112,7 @@ export default function IdentifyScreen() {
   const handleScannedId = async (scanValue: string) => {
     const normalizedScan = scanValue.replace(/\s+/g, ' ').trim();
     if (!normalizedScan) return;
+    setCustomSection(false);
 
     // School ID QR codes can contain several values, e.g.
     // "STUDENT NAME STU2024101 BSIT" or "STUDENT NAME 2021304481 BSIT".
@@ -201,6 +217,7 @@ export default function IdentifyScreen() {
 
     setStudents([...students, currentStudent]);
     setCurrentStudent({ student_id: '', full_name: '', program: '', year_level: '', section: '' });
+    setCustomSection(false);
     setTimeout(() => scanInputRef.current?.focus(), 100);
   };
 
@@ -384,14 +401,21 @@ export default function IdentifyScreen() {
               </View>
               <View style={[styles.inputGroup, { flex: 1 }]}>
                 <Text style={styles.inputLabel}>Section</Text>
-                <TextInput
+                {sectionMustBeTyped ? <TextInput
                   testID="input-section"
                   style={[styles.input, !currentStudent.section.trim() && styles.inputError]}
-                  placeholder="e.g., BSCS-3A"
+                  placeholder="Type your section"
                   value={currentStudent.section}
                   onChangeText={(v) => setCurrentStudent({ ...currentStudent, section: v })}
                   autoCapitalize="characters"
-                />
+                /> : <TouchableOpacity
+                  testID="input-section"
+                  style={[styles.input, styles.selectInput, !currentStudent.section.trim() && styles.inputError]}
+                  onPress={() => setSectionPickerVisible(true)}
+                >
+                  <Text style={currentStudent.section ? styles.selectValue : styles.selectPlaceholder}>{currentStudent.section || 'Select section'}</Text>
+                  <Ionicons name="chevron-down" size={18} color="#666" />
+                </TouchableOpacity>}
                 {!currentStudent.section.trim() && <Text style={styles.fieldRequiredText}>Section is required.</Text>}
               </View>
             </View>
@@ -468,6 +492,18 @@ export default function IdentifyScreen() {
           </View>
         </View>
       </Modal>
+      <Modal transparent visible={sectionPickerVisible} animationType="fade" onRequestClose={() => setSectionPickerVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.yearPickerModal}>
+            <Text style={styles.yearPickerTitle}>Select Section</Text>
+            <ScrollView style={styles.sectionOptions} contentContainerStyle={styles.sectionOptionsContent}>
+              {sectionOptions.map((section) => <TouchableOpacity key={section} style={[styles.yearOption, currentStudent.section === section && styles.yearOptionSelected]} onPress={() => { setCurrentStudent({ ...currentStudent, section }); setCustomSection(false); setSectionPickerVisible(false); }}><Text style={[styles.yearOptionText, currentStudent.section === section && styles.yearOptionTextSelected]}>{section}</Text>{currentStudent.section === section && <Ionicons name="checkmark" size={20} color="#2196F3" />}</TouchableOpacity>)}
+              <TouchableOpacity style={styles.yearOption} onPress={() => { setCurrentStudent({ ...currentStudent, section: '' }); setCustomSection(true); setSectionPickerVisible(false); }}><Text style={styles.yearOptionText}>Other — type my section</Text></TouchableOpacity>
+            </ScrollView>
+            <TouchableOpacity style={styles.yearPickerCancel} onPress={() => setSectionPickerVisible(false)}><Text style={styles.yearPickerCancelText}>Cancel</Text></TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -541,6 +577,8 @@ const styles = StyleSheet.create({
   selectInput: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
   selectValue: { color: '#1A1A1A', fontSize: 14 },
   selectPlaceholder: { color: '#999', fontSize: 14 },
+  sectionOptions: { maxHeight: 330 },
+  sectionOptionsContent: { paddingBottom: 4 },
   fieldRequiredText: { color: '#C62828', fontSize: 11, marginTop: 4 },
   requiredWarning: {
     flexDirection: 'row', alignItems: 'center', gap: 6,

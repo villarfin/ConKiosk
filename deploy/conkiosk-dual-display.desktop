@@ -4,5 +4,7 @@ Name=ConKiosk dual-display launcher
 Comment=Open the student kiosk on HDMI-1 and TV board on HDMI-2
 Exec=/home/conkiosk/.local/bin/conkiosk-dual-display
 Terminal=false
-X-GNOME-Autostart-enabled=true
+# Labwc starts the launcher from deploy/conkiosk-labwc-autostart instead.
+# Keeping this entry hidden prevents an ordinary duplicate Chromium session.
+Hidden=true
 OnlyShowIn=Labwc;LXDE;LXQt;

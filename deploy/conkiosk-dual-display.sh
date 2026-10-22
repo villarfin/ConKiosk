@@ -38,21 +38,19 @@ done
 
 # Separate browser profiles allow two independent Chromium kiosk windows.
 # Labwc rules (conkiosk-labwc-rc.xml) place these classes on their HDMI outputs.
-if ! pgrep -f -- "--class=conkiosk-kiosk" >/dev/null 2>&1; then
-  chromium $CHROMIUM_WAYLAND_FLAGS \
-    --class=conkiosk-kiosk --kiosk --no-first-run --disable-session-crashed-bubble \
-    --disable-infobars --user-data-dir="$KIOSK_PROFILE" "$KIOSK_URL" >/dev/null 2>&1 &
-fi
+# This script is run only by Labwc's single autostart entry. Do not use pgrep
+# here: it can match the launcher itself and prevent either window from opening.
+chromium $CHROMIUM_WAYLAND_FLAGS \
+  --class=conkiosk-kiosk --kiosk --no-first-run --disable-session-crashed-bubble \
+  --disable-infobars --user-data-dir="$KIOSK_PROFILE" "$KIOSK_URL" >/dev/null 2>&1 &
 
 # HDMI2 is optional at boot. Give a connected TV time to wake, but never hold
 # the kiosk hostage while doing so.
 for _ in $(seq 1 30); do
   if output_enabled HDMI-A-2; then
-    if ! pgrep -f -- "--class=conkiosk-tv" >/dev/null 2>&1; then
-      chromium $CHROMIUM_WAYLAND_FLAGS \
-        --class=conkiosk-tv --kiosk --autoplay-policy=no-user-gesture-required --no-first-run --disable-session-crashed-bubble \
-        --disable-infobars --user-data-dir="$TV_PROFILE" "$TV_URL" >/dev/null 2>&1 &
-    fi
+    chromium $CHROMIUM_WAYLAND_FLAGS \
+      --class=conkiosk-tv --kiosk --autoplay-policy=no-user-gesture-required --no-first-run --disable-session-crashed-bubble \
+      --disable-infobars --user-data-dir="$TV_PROFILE" "$TV_URL" >/dev/null 2>&1 &
     break
   fi
   sleep 2
