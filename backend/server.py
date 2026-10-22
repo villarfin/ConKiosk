@@ -490,6 +490,13 @@ async def startup():
                 SELECT 1 FROM consultations c WHERE c.queue_id = q.id AND c.status = 'ongoing')"""))
         await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS one_ongoing_consultation_per_faculty ON consultations (faculty_school_id) WHERE status = 'ongoing'"))
         await conn.execute(text("UPDATE faculty f SET availability_status = 'busy' WHERE EXISTS (SELECT 1 FROM consultations c WHERE c.faculty_school_id = f.school_id AND c.status = 'ongoing')"))
+        # An old/manual Available flag is not proof that a faculty app is
+        # currently connected.  On restart, fail closed for stale or unseen
+        # presence; a live authenticated app reconnects and restores itself.
+        await conn.execute(text("""UPDATE faculty SET availability_status = 'unavailable',
+            accepting_consultations = false, presence_restore_available = true
+            WHERE availability_status = 'available'
+              AND (presence_last_seen IS NULL OR presence_last_seen < NOW() - INTERVAL '100 seconds')"""))
     if ADMIN_SCHOOL_ID and ADMIN_PASSWORD:
         async with SessionLocal() as db:
             admin = await db.scalar(select(Faculty).where(Faculty.school_id == ADMIN_SCHOOL_ID))
