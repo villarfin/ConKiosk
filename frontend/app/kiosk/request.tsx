@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { apiUrl } from '@/src/config/api';
 import { getKioskDraft, clearKioskDraft } from '@/src/utils/kiosk-draft';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import KioskTouchKeyboard from '@/src/components/KioskTouchKeyboard';
 
 
 interface Student {
@@ -41,6 +42,7 @@ export default function RequestScreen() {
   const { students, submissionId } = getKioskDraft();
   const [topic, setTopic] = useState('');
   const [customTopic, setCustomTopic] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async () => {
@@ -154,6 +156,7 @@ export default function RequestScreen() {
               placeholder="Type your consultation topic"
               value={topic}
               onChangeText={setTopic}
+              onFocus={() => setKeyboardVisible(true)}
               multiline
               numberOfLines={4}
               textAlignVertical="top"
@@ -184,6 +187,7 @@ export default function RequestScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+      <KioskTouchKeyboard visible={keyboardVisible} onKey={(key) => setTopic(current => key === 'BACKSPACE' ? current.slice(0, -1) : key === 'CLEAR' ? '' : `${current}${key}`)} onClose={() => setKeyboardVisible(false)} />
     </SafeAreaView>
   );
 }
