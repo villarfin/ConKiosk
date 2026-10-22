@@ -12,7 +12,7 @@ TV_PROFILE="$HOME/.local/share/conkiosk-tv-browser"
 # inputs. Without this, the on-screen keyboard can disappear in --kiosk mode.
 # ConKiosk screens do not store user credentials. Avoid GNOME Keyring so a
 # kiosk boot never opens an "Unlock Keyring" dialog.
-CHROMIUM_WAYLAND_FLAGS="--ozone-platform=wayland --enable-features=UseOzonePlatform --enable-wayland-ime --wayland-text-input-version=3 --password-store=basic"
+CHROMIUM_WAYLAND_FLAGS="--ozone-platform=wayland --enable-features=UseOzonePlatform,VirtualKeyboard --enable-wayland-ime --wayland-text-input-version=3 --password-store=basic"
 
 mkdir -p "$KIOSK_PROFILE" "$TV_PROFILE"
 
@@ -56,7 +56,7 @@ done
 # here: it can match the launcher itself and prevent either window from opening.
 focus_hdmi1
 chromium $CHROMIUM_WAYLAND_FLAGS \
-  --class=conkiosk-kiosk --kiosk --no-first-run --disable-session-crashed-bubble \
+  --class=conkiosk-kiosk --start-fullscreen --no-first-run --disable-session-crashed-bubble \
   --disable-infobars --user-data-dir="$KIOSK_PROFILE" "$KIOSK_URL" >/dev/null 2>&1 &
 
 # Chromium maps its Wayland window asynchronously. Keep the pointer on HDMI1
