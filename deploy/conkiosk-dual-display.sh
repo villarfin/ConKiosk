@@ -59,6 +59,11 @@ chromium $CHROMIUM_WAYLAND_FLAGS \
   --class=conkiosk-kiosk --kiosk --no-first-run --disable-session-crashed-bubble \
   --disable-infobars --user-data-dir="$KIOSK_PROFILE" "$KIOSK_URL" >/dev/null 2>&1 &
 
+# Chromium maps its Wayland window asynchronously. Keep the pointer on HDMI1
+# until that kiosk window has been created; otherwise it follows the later
+# HDMI2 focus and both screens can land on the TV output.
+sleep 5
+
 # HDMI2 is optional at boot. Give a connected TV time to wake, but never hold
 # the kiosk hostage while doing so.
 for _ in $(seq 1 30); do
