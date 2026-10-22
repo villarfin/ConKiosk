@@ -26,6 +26,8 @@ interface Student {
   section: string;
 }
 
+const COMMON_TOPICS = ['Grades', 'Capstone', 'PIT', 'Activity', 'Subject'];
+
 export default function RequestScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -38,6 +40,7 @@ export default function RequestScreen() {
 
   const { students, submissionId } = getKioskDraft();
   const [topic, setTopic] = useState('');
+  const [customTopic, setCustomTopic] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async () => {
@@ -140,20 +143,25 @@ export default function RequestScreen() {
           {/* Topic */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Consultation Topic</Text>
-            <Text style={styles.hint}>What would you like to discuss with the faculty?</Text>
-            <TextInput
+            <Text style={styles.hint}>Choose the topic that best describes your consultation.</Text>
+            <View style={styles.topicOptions}>
+              {COMMON_TOPICS.map((option) => <TouchableOpacity key={option} testID={`topic-${option.toLowerCase()}`} style={[styles.topicOption, !customTopic && topic === option && styles.topicOptionSelected]} onPress={() => { setTopic(option); setCustomTopic(false); }}><Text style={[styles.topicOptionText, !customTopic && topic === option && styles.topicOptionTextSelected]}>{option}</Text></TouchableOpacity>)}
+              <TouchableOpacity testID="topic-other" style={[styles.topicOption, customTopic && styles.topicOptionSelected]} onPress={() => { setTopic(''); setCustomTopic(true); }}><Ionicons name="create-outline" size={16} color={customTopic ? '#FFFFFF' : '#1D4ED8'} /><Text style={[styles.topicOptionText, customTopic && styles.topicOptionTextSelected]}>Other</Text></TouchableOpacity>
+            </View>
+            {customTopic && <TextInput
               testID="input-topic"
               style={[styles.topicInput, !topic.trim() && styles.topicInputError]}
-              placeholder="e.g., Discussion on thesis chapter 3, Programming assignment help..."
+              placeholder="Type your consultation topic"
               value={topic}
               onChangeText={setTopic}
               multiline
-              numberOfLines={5}
+              numberOfLines={4}
               textAlignVertical="top"
               maxLength={300}
-            />
+              autoFocus
+            />}
             {!topic.trim() && <Text style={styles.fieldRequiredText}>Consultation Topic is required.</Text>}
-            <Text style={styles.charCount}>{topic.length}/300</Text>
+            {customTopic && <Text style={styles.charCount}>{topic.length}/300</Text>}
           </View>
         </ScrollView>
 
@@ -245,6 +253,11 @@ const styles = StyleSheet.create({
   studentName: { fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
   studentMeta: { fontSize: 12, color: '#666', marginTop: 2 },
   hint: { fontSize: 12, color: '#666', marginBottom: 8 },
+  topicOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  topicOption: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10 },
+  topicOptionSelected: { backgroundColor: '#1D4ED8', borderColor: '#1D4ED8' },
+  topicOptionText: { color: '#1D4ED8', fontSize: 14, fontWeight: '700' },
+  topicOptionTextSelected: { color: '#FFFFFF' },
   topicInput: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -253,6 +266,7 @@ const styles = StyleSheet.create({
     minHeight: 120,
     borderWidth: 1,
     borderColor: '#E0E0E0',
+    marginTop: 12,
   },
   topicInputError: { borderColor: '#C62828', borderWidth: 1.5 },
   fieldRequiredText: { color: '#C62828', fontSize: 11, marginTop: 4 },
