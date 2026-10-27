@@ -31,15 +31,17 @@ export function ServerConnectionStatus() {
   return (
     <View pointerEvents="none" accessibilityLiveRegion="polite" style={[styles.badge, connected ? styles.connected : styles.unreachable]}>
       <View style={styles.dot} />
-      <Text style={styles.text}>ConKiosk Server {connected ? 'Connected' : 'Unreachable'}</Text>
+      <Text style={styles.text}>{connected ? 'Server online' : 'Server offline'}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  badge: { alignSelf: 'stretch', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, minHeight: 34, paddingHorizontal: 12, paddingVertical: 7 },
+  // Floating status keeps connection feedback visible without reserving a
+  // full-width row above the kiosk and TV interfaces.
+  badge: { position: 'absolute', zIndex: 100, top: 10, left: 10, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 12, elevation: 5 },
   connected: { backgroundColor: '#166534' },
   unreachable: { backgroundColor: '#B91C1C' },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#FFFFFF' },
-  text: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFFFFF' },
+  text: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
 });
