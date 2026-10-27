@@ -16,6 +16,14 @@ CHROMIUM_WAYLAND_FLAGS="--ozone-platform=wayland --enable-features=UseOzonePlatf
 
 mkdir -p "$KIOSK_PROFILE" "$TV_PROFILE"
 
+# Persist the known working extended desktop at every graphical login. The
+# touchscreen kiosk is on HDMI-A-1; the Samsung TV starts immediately to its
+# right on HDMI-A-2. `|| true` keeps the kiosk usable if the TV is unplugged.
+configure_outputs() {
+  wlr-randr --output HDMI-A-1 --on --mode 1920x1200@59.950001Hz --pos 0,0 >/dev/null 2>&1 || true
+  wlr-randr --output HDMI-A-2 --on --mode 1920x1080@60Hz --pos 1920,0 >/dev/null 2>&1 || true
+}
+
 output_enabled() {
   wlr-randr | awk -v output="$1" '
     $1 == output { checking = 1; next }
@@ -50,13 +58,15 @@ for _ in $(seq 1 60); do
 done
 [ "$ready" -eq 1 ] || exit 0
 
+configure_outputs
+
 # Separate browser profiles allow two independent Chromium kiosk windows.
 # Labwc rules (conkiosk-labwc-rc.xml) place these classes on their HDMI outputs.
 # This script is run only by Labwc's single autostart entry. Do not use pgrep
 # here: it can match the launcher itself and prevent either window from opening.
 focus_hdmi1
 chromium $CHROMIUM_WAYLAND_FLAGS \
-  --class=conkiosk-kiosk --start-fullscreen --no-first-run --disable-session-crashed-bubble \
+  --class=conkiosk-kiosk --no-first-run --disable-session-crashed-bubble \
   --disable-infobars --user-data-dir="$KIOSK_PROFILE" "$KIOSK_URL" >/dev/null 2>&1 &
 
 # Chromium maps its Wayland window asynchronously. Keep the pointer on HDMI1

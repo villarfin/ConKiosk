@@ -202,8 +202,8 @@ const styles = StyleSheet.create({
   },
   backButton: { padding: 8 },
   headerContent: { flex: 1 },
-  headerTitle: { fontSize: 20, fontWeight: '700', color: '#1A1A1A' },
-  headerSubtitle: { fontSize: 12, color: '#666', marginTop: 2 },
+  headerTitle: { fontSize: 24, fontWeight: '700', color: '#1A1A1A' },
+  headerSubtitle: { fontSize: 15, color: '#666', marginTop: 2 },
   content: { padding: 16 },
   facultyCard: {
     flexDirection: 'row',
@@ -227,9 +227,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  facultyName: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
+  facultyName: { fontSize: 19, fontWeight: '700', color: '#1A1A1A' },
   facultyMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
-  facultyMetaText: { fontSize: 12, color: '#666' },
+  facultyMetaText: { fontSize: 14, color: '#666' },
   section: { marginBottom: 20 },
   sectionTitle: { fontSize: 14, fontWeight: '600', color: '#666', textTransform: 'uppercase', marginBottom: 12 },
   studentRow: {
@@ -287,5 +287,5 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   submitBtnDisabled: { backgroundColor: '#90CAF9' },
-  submitBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  submitBtnText: { color: '#FFFFFF', fontSize: 18, fontWeight: '600' },
 });

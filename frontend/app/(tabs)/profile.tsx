@@ -19,6 +19,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { ApiClient } from '@/src/utils/api';
+import { ScheduleEditor, ScheduleEntry } from '@/src/components/ScheduleEditor';
 
 export default function ProfileScreen() {
   const { faculty, logout, updateFaculty } = useAuth();
@@ -33,13 +34,14 @@ export default function ProfileScreen() {
   const [editDepartment, setEditDepartment] = useState(faculty?.department || '');
   const [editOffice, setEditOffice] = useState(faculty?.office_location || '');
   const [editOfficeHours, setEditOfficeHours] = useState(faculty?.office_hours || '');
+  const [editSchedules, setEditSchedules] = useState<ScheduleEntry[]>(faculty?.class_schedules || []);
 
   // Change password state
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const isProfileIncomplete = !editName.trim() || !editEmail.trim() || !editDepartment.trim()
-    || !editOffice.trim() || !editOfficeHours.trim();
+    || !editOffice.trim();
   const isPasswordIncomplete = !currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim();
 
   const pickImage = async () => {
@@ -100,6 +102,7 @@ export default function ProfileScreen() {
     setEditDepartment(faculty?.department || '');
     setEditOffice(faculty?.office_location || '');
     setEditOfficeHours(faculty?.office_hours || '');
+    setEditSchedules(faculty?.class_schedules || []);
     setEditModalVisible(true);
   };
 
@@ -116,6 +119,7 @@ export default function ProfileScreen() {
         department: editDepartment,
         office_location: editOffice,
         office_hours: editOfficeHours,
+        class_schedules: editSchedules,
       });
 
       updateFaculty(updated);
@@ -350,13 +354,8 @@ export default function ProfileScreen() {
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Office Hours</Text>
-                <TextInput
-                  style={[styles.input, !editOfficeHours.trim() && styles.inputError]}
-                  value={editOfficeHours}
-                  onChangeText={setEditOfficeHours}
-                  placeholder="e.g., Mon-Fri 9:00 AM - 5:00 PM"
-                />
-                {!editOfficeHours.trim() && <Text style={styles.fieldRequiredText}>Office Hours is required.</Text>}
+                <ScheduleEditor value={editSchedules} onChange={setEditSchedules} />
+                <Text style={styles.scheduleHint}>Optional: add your class periods from 7:00 AM onward. Your saved schedule is shown on the TV faculty card.</Text>
               </View>
 
               <TouchableOpacity
@@ -651,6 +650,7 @@ const styles = StyleSheet.create({
   },
   inputError: { borderColor: '#C62828', borderWidth: 1.5 },
   fieldRequiredText: { color: '#C62828', fontSize: 11, marginTop: 4 },
+  scheduleHint: { color: '#64748B', fontSize: 12, lineHeight: 18, marginTop: -8, marginBottom: 6 },
   saveButton: {
     backgroundColor: '#2196F3',
     padding: 16,

@@ -16,6 +16,7 @@ interface Faculty {
   availability_status: string;
   accepting_consultations: boolean;
   office_hours?: string;
+  class_schedules?: { day: string; start: string; end: string }[];
   role: 'faculty' | 'admin' | 'it_chair';
 }
 

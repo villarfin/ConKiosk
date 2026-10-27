@@ -123,8 +123,8 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
-  title: { fontSize: 28, fontWeight: '700', color: '#1A1A1A' },
-  subtitle: { fontSize: 15, color: '#666', marginTop: 6, marginBottom: 24 },
+  title: { fontSize: 32, fontWeight: '700', color: '#1A1A1A' },
+  subtitle: { fontSize: 17, color: '#666', marginTop: 6, marginBottom: 24 },
   queueCard: {
     width: '100%',
     backgroundColor: '#FFFFFF',
@@ -139,16 +139,16 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   queueLabel: { fontSize: 12, letterSpacing: 2, color: '#666', fontWeight: '600' },
-  queueNumber: { fontSize: 72, fontWeight: '800', color: '#2196F3', marginVertical: 8 },
+  queueNumber: { fontSize: 80, fontWeight: '800', color: '#2196F3', marginVertical: 8 },
   captureTimer: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: '#E3F2FD', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 7,
   },
   captureTimerText: { color: '#1565C0', fontSize: 12, fontWeight: '600' },
   queueDivider: { width: '60%', height: 1, backgroundColor: '#E0E0E0', marginVertical: 12 },
-  facultyName: { fontSize: 18, fontWeight: '700', color: '#1A1A1A' },
+  facultyName: { fontSize: 21, fontWeight: '700', color: '#1A1A1A' },
   officeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
-  officeText: { fontSize: 13, color: '#666' },
+  officeText: { fontSize: 15, color: '#666' },
   instructions: { width: '100%', marginBottom: 24, gap: 12 },
   instructionRow: {
     flexDirection: 'row',
@@ -174,6 +174,6 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
   },
-  doneBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  doneBtnText: { color: '#FFFFFF', fontSize: 18, fontWeight: '600' },
   autoReturnHint: { marginTop: 16, fontSize: 12, color: '#999' },
 });

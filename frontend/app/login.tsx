@@ -22,11 +22,13 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [loginAttempted, setLoginAttempted] = useState(false);
   const { login } = useAuth();
   const router = useRouter();
   const { registration } = useLocalSearchParams<{ registration?: string }>();
 
   const handleLogin = async () => {
+    setLoginAttempted(true);
     if (!schoolId || !password) {
       setLoginError('Enter both your School ID and password.');
       return;
@@ -76,7 +78,7 @@ export default function LoginScreen() {
             {/* School ID Input */}
             <View style={styles.inputContainer}>
               <Text style={styles.label}>School ID Number</Text>
-              <View style={[styles.inputWrapper, !schoolId.trim() && styles.inputWrapperError]}>
+              <View style={[styles.inputWrapper, loginAttempted && !schoolId.trim() && styles.inputWrapperError]}>
                 <Ionicons name="person-outline" size={20} color="#666" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
@@ -88,13 +90,13 @@ export default function LoginScreen() {
                   editable={!loading}
                 />
               </View>
-              {!schoolId.trim() && <Text style={styles.fieldRequiredText}>School ID Number is required.</Text>}
+              {loginAttempted && !schoolId.trim() && <Text style={styles.fieldRequiredText}>School ID Number is required.</Text>}
             </View>
 
             {/* Password Input */}
             <View style={styles.inputContainer}>
               <Text style={styles.label}>Password</Text>
-              <View style={[styles.inputWrapper, !password.trim() && styles.inputWrapperError]}>
+              <View style={[styles.inputWrapper, loginAttempted && !password.trim() && styles.inputWrapperError]}>
                 <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
@@ -117,7 +119,7 @@ export default function LoginScreen() {
                   />
                 </TouchableOpacity>
               </View>
-              {!password.trim() && <Text style={styles.fieldRequiredText}>Password is required.</Text>}
+              {loginAttempted && !password.trim() && <Text style={styles.fieldRequiredText}>Password is required.</Text>}
             </View>
 
             {/* Login Button */}

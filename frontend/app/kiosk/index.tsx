@@ -81,6 +81,7 @@ export default function KioskHome() {
   };
 
   const canRequest = (person: Faculty) => person.availability_status === 'available' || (person.availability_status === 'busy' && person.accepting_consultations);
+  const orderedFaculty = [...faculty].sort((first, second) => Number(canRequest(second)) - Number(canRequest(first)) || first.full_name.localeCompare(second.full_name));
 
   const handleSelectFaculty = (f: Faculty) => {
     if (!canRequest(f)) return;
@@ -109,15 +110,15 @@ export default function KioskHome() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
+        <View style={styles.brandRow}><View style={styles.brandIcon}><Ionicons name="people" size={26} color="#FFFFFF" /></View><View>
           <Text style={styles.title}>ConKiosk</Text>
           <Text style={styles.subtitle}>Faculty Consultation System</Text>
-        </View>
+        </View></View>
       </View>
 
       <View style={styles.subHeader}>
         <Text style={styles.subHeaderTitle}>Select a Faculty Member</Text>
-        <Text style={styles.subHeaderText}>Choose a faculty member marked as accepting consultations</Text>
+        <Text style={styles.subHeaderText}>Tap an available faculty card to begin your consultation request.</Text>
       </View>
 
       {/* Legend */}
@@ -143,7 +144,7 @@ export default function KioskHome() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <View style={styles.grid}>
-          {faculty.map((f) => (
+          {orderedFaculty.map((f) => (
             <TouchableOpacity
               key={f.school_id}
               testID={`faculty-card-${f.school_id}`}
@@ -154,6 +155,8 @@ export default function KioskHome() {
               onPress={() => handleSelectFaculty(f)}
               disabled={!canRequest(f)}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={`${f.full_name}. ${getConsultationLabel(f)}${canRequest(f) ? '. Tap to request a consultation.' : ''}`}
             >
               <View style={styles.cardHeader}>
                 <View style={styles.avatarContainer}>
@@ -178,14 +181,14 @@ export default function KioskHome() {
                 <Text style={styles.cardOfficeText} numberOfLines={1}>{f.office_location}</Text>
               </View>
 
-              <View style={[styles.statusBadge, { backgroundColor: getStatusColor(f.availability_status) }]}>
+              <View style={[styles.statusBadge, { backgroundColor: getStatusColor(f.availability_status) }]}> 
                 <Text style={styles.statusBadgeText}>{getConsultationLabel(f)}</Text>
               </View>
 
               {canRequest(f) && (
                 <View style={styles.selectHint}>
-                  <Text style={styles.selectHintText}>{f.availability_status === 'busy' ? 'Tap to request a consultation' : 'Tap to consult'}</Text>
-                  <Ionicons name="arrow-forward" size={14} color="#2196F3" />
+                  <Text style={styles.selectHintText}>{f.availability_status === 'busy' ? 'Request consultation' : 'Tap to consult'}</Text>
+                  <Ionicons name="arrow-forward-circle" size={21} color="#FFFFFF" />
                 </View>
               )}
               {f.availability_status === 'busy' && !f.accepting_consultations && <Text style={styles.unavailableHint}>This faculty member is currently busy.</Text>}
@@ -210,11 +213,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E0E0E0',
   },
-  title: { fontSize: 28, fontWeight: '700', color: '#1A1A1A' },
-  subtitle: { fontSize: 14, color: '#666', marginTop: 2 },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  brandIcon: { width: 52, height: 52, borderRadius: 16, backgroundColor: '#1D4ED8', alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 36, fontWeight: '700', color: '#1A1A1A' },
+  subtitle: { fontSize: 18, color: '#666', marginTop: 2 },
   subHeader: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 8 },
-  subHeaderTitle: { fontSize: 22, fontWeight: '700', color: '#1A1A1A' },
-  subHeaderText: { fontSize: 14, color: '#666', marginTop: 4 },
+  subHeaderTitle: { fontSize: 29, fontWeight: '700', color: '#1A1A1A' },
+  subHeaderText: { fontSize: 18, color: '#666', marginTop: 4 },
   legend: {
     flexDirection: 'row',
     gap: 20,
@@ -224,23 +229,25 @@ const styles = StyleSheet.create({
   },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendDot: { width: 10, height: 10, borderRadius: 5 },
-  legendText: { fontSize: 12, color: '#666' },
+  legendText: { fontSize: 14, color: '#666' },
   scrollView: { flex: 1 },
   scrollContent: { padding: 16, paddingTop: 8 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'flex-start' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, justifyContent: 'flex-start' },
   card: {
     width: '48%',
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 18,
+    padding: 18,
+    borderWidth: 2,
+    borderColor: '#DCE7F5',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 3,
-    minHeight: 200,
+    minHeight: 224,
   },
-  cardDisabled: { opacity: 0.55 },
+  cardDisabled: { opacity: 0.58, backgroundColor: '#F8FAFC', borderColor: '#E2E8F0' },
   cardHeader: { alignItems: 'center', marginBottom: 12 },
   avatarContainer: { position: 'relative' },
   avatar: { width: 64, height: 64, borderRadius: 32 },
@@ -263,8 +270,8 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#FFFFFF',
   },
-  cardName: { fontSize: 15, fontWeight: '600', color: '#1A1A1A', textAlign: 'center' },
-  cardDept: { fontSize: 12, color: '#666', textAlign: 'center', marginTop: 2 },
+  cardName: { fontSize: 21, fontWeight: '600', color: '#1A1A1A', textAlign: 'center' },
+  cardDept: { fontSize: 16, color: '#666', textAlign: 'center', marginTop: 2 },
   cardOffice: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -272,22 +279,26 @@ const styles = StyleSheet.create({
     marginTop: 8,
     justifyContent: 'center',
   },
-  cardOfficeText: { fontSize: 11, color: '#666', flex: 1, textAlign: 'center' },
+  cardOfficeText: { fontSize: 15, color: '#666', flex: 1, textAlign: 'center' },
   statusBadge: {
     marginTop: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 12,
     alignSelf: 'center',
   },
-  statusBadgeText: { fontSize: 11, fontWeight: '600', color: '#FFFFFF' },
+  statusBadgeText: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
   selectHint: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    marginTop: 10,
+    gap: 7,
+    marginTop: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#1D4ED8',
   },
-  selectHintText: { color: '#2196F3', fontSize: 12, fontWeight: '500' },
-  unavailableHint: { color: '#8A4B00', fontSize: 11, textAlign: 'center', marginTop: 10 },
+  selectHintText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+  unavailableHint: { color: '#8A4B00', fontSize: 13, textAlign: 'center', marginTop: 12 },
 });

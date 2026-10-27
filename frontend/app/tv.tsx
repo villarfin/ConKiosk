@@ -9,7 +9,7 @@ let announcementAudioContext: AudioContext | null = null;
 
 interface NowServing { queue_number: string; student_names: string[]; topic: string; }
 interface FacultyStatus {
-  school_id: string; full_name: string; office_location: string; availability_status: string;
+  school_id: string; full_name: string; office_location: string; office_hours: string; availability_status: string;
   profile_image?: string;
   now_serving: NowServing | null; waiting_count: number; next_queue_numbers: string[];
 }
@@ -140,7 +140,7 @@ export default function TVDisplay() {
   let cardScale = 0;
   for (let columns = 1; columns <= count; columns++) {
     const rows = Math.ceil(count / columns);
-    const scale = Math.min(1, facultySpace.width / columns / 342, facultySpace.height / rows / 152);
+    const scale = Math.min(1, facultySpace.width / columns / 342, facultySpace.height / rows / 170);
     if (scale > cardScale) { cardScale = scale; facultyColumns = columns; }
   }
   const facultyRows = Math.ceil(count / facultyColumns);
@@ -170,9 +170,9 @@ export default function TVDisplay() {
           <View style={styles.facultySectionHeader}><View><Text style={styles.sectionEyebrow}>MEET YOUR INSTRUCTORS</Text><Text style={styles.sectionTitle}>Faculty availability</Text></View><View style={styles.liveBadge}><View style={styles.liveDot} /><Text style={styles.liveText}>LIVE</Text></View></View>
           <View style={[styles.facultyGrid, { flex: 1, minHeight: 0, gap: 0 }]} onLayout={({ nativeEvent: { layout } }) => setFacultySpace(previous => previous.width === layout.width && previous.height === layout.height ? previous : { width: layout.width, height: layout.height })}>{faculty.map(person => {
             const color = person.availability_status === 'available' ? '#15803D' : person.availability_status === 'busy' ? '#B8860B' : '#B91C1C';
-            return <View key={person.school_id} style={{ width: slotWidth, height: slotHeight, alignItems: 'center', justifyContent: 'center' }}><View style={[styles.facultyTile, { width: 330, height: 140, flexShrink: 0, borderLeftColor: color, transform: [{ scale: cardScale }] }]}>
+            return <View key={person.school_id} style={{ width: slotWidth, height: slotHeight, alignItems: 'center', justifyContent: 'center' }}><View style={[styles.facultyTile, { width: 330, height: 158, flexShrink: 0, borderLeftColor: color, transform: [{ scale: cardScale }] }]}>
               <View style={[styles.profileCircle, { borderColor: color }]}>{person.profile_image ? <Image source={{ uri: photoUrl(person.profile_image) }} accessibilityLabel={`${person.full_name} profile photo`} style={styles.profilePhoto} /> : <Ionicons name="person" size={26} color="#C8A348" />}</View>
-              <View style={styles.facultyDetails}><Text style={styles.facultyCardName} numberOfLines={2}>{person.full_name}</Text><View style={styles.facultyOfficeRow}><Ionicons name="location-outline" size={12} color="#64748B" /><Text style={styles.facultyCardOffice} numberOfLines={1}>{person.office_location || 'Office not specified'}</Text></View><View style={styles.facultyStatusRow}><View style={[styles.availabilityDot, { backgroundColor: color }]} /><Text style={[styles.facultyStatusText, { color }]}>{person.availability_status.toUpperCase()}</Text></View></View>
+              <View style={styles.facultyDetails}><Text style={styles.facultyCardName} numberOfLines={2}>{person.full_name}</Text><View style={styles.facultyOfficeRow}><Ionicons name="location-outline" size={13} color="#64748B" /><Text style={styles.facultyCardOffice} numberOfLines={1}>{person.office_location || 'Office not specified'}</Text></View><View style={styles.facultyOfficeRow}><Ionicons name="time-outline" size={13} color="#64748B" /><Text style={styles.facultyHours} numberOfLines={2}>{person.office_hours}</Text></View><View style={styles.facultyStatusRow}><View style={[styles.availabilityDot, { backgroundColor: color }]} /><Text style={[styles.facultyStatusText, { color }]}>{person.availability_status.toUpperCase()}</Text></View></View>
             </View></View>;
           })}</View>
         </View>
@@ -203,17 +203,18 @@ const styles = StyleSheet.create({
   profileCircle: { width: 56, height: 56, borderRadius: 28, borderWidth: 2, backgroundColor: '#172747', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 },
   profilePhoto: { width: '100%', height: '100%', resizeMode: 'cover' },
   facultyDetails: { flex: 1, minWidth: 0 },
-  facultyCardName: { color: '#172747', fontSize: 19, fontWeight: '800' },
+  facultyCardName: { color: '#172747', fontSize: 23, fontWeight: '800' },
   facultyOfficeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 },
-  facultyCardOffice: { color: '#64748B', fontSize: 12, flexShrink: 1 },
+  facultyCardOffice: { color: '#64748B', fontSize: 15, flexShrink: 1 },
+  facultyHours: { color: '#475569', fontSize: 14, flexShrink: 1, fontWeight: '600' },
   facultyStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 9 },
-  facultyStatusText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
+  facultyStatusText: { fontSize: 13, fontWeight: '800', letterSpacing: 0.8 },
   queueEntries: { flex: 1, minHeight: 0, gap: 12 },
   queueEntry: { flex: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center', padding: 10, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E7DFC8', overflow: 'hidden' },
-  queueInstructor: { color: '#0F172A', fontSize: 22, fontWeight: '800', textAlign: 'center' },
-  queueNumberLabel: { color: '#8A681F', fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginTop: 8 },
-  largeQueueNumber: { color: '#172747', fontSize: 72, lineHeight: 80, fontWeight: '900', textAlign: 'center', width: '100%', fontVariant: ['tabular-nums'] },
-  nextQueueLine: { color: '#334155', fontSize: 18, fontWeight: '700', marginTop: 4 },
+  queueInstructor: { color: '#0F172A', fontSize: 25, fontWeight: '800', textAlign: 'center' },
+  queueNumberLabel: { color: '#8A681F', fontSize: 13, fontWeight: '800', letterSpacing: 1.5, marginTop: 8 },
+  largeQueueNumber: { color: '#172747', fontSize: 82, lineHeight: 90, fontWeight: '900', textAlign: 'center', width: '100%', fontVariant: ['tabular-nums'] },
+  nextQueueLine: { color: '#334155', fontSize: 21, fontWeight: '700', marginTop: 4 },
   facultyArea: { flex: 1, padding: 20, overflow: 'hidden' }, facultyGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 18 }, facultyTile: { width: '47%', flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, backgroundColor: '#FFFFFF', borderRadius: 12, borderLeftWidth: 6, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } }, availabilityDot: { width: 7, height: 7, borderRadius: 4 },
   queueCard: { alignSelf: 'stretch', margin: 12, flexShrink: 0, backgroundColor: '#F4F1E9', borderRadius: 16, overflow: 'hidden', padding: 14, borderWidth: 2, borderColor: '#C8A348' }, queueTitle: { fontSize: 18, fontWeight: '900', color: '#172747', marginBottom: 10 }, queueTableHeading: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 2, borderBottomColor: '#CBD5E1', paddingBottom: 8 }, queueHeadingText: { fontSize: 9, fontWeight: '800', color: '#475569' }, queueTableRow: { height: 72, flexDirection: 'row', alignItems: 'center', gap: 8, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' }, tableQueueNumber: { color: '#172747', fontSize: 29, fontWeight: '900' }, tableNext: { color: '#475569', fontSize: 10, maxWidth: 155 }, queueCardFooter: { color: '#475569', fontSize: 10, paddingTop: 8 },
   container: { flex: 1, backgroundColor: '#101D35', overflow: 'hidden' }, loading: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#101D35' },

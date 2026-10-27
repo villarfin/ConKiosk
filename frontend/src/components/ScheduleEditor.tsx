@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 export type ScheduleEntry = { day: string; start: string; end: string };
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-const TIMES = Array.from({ length: 29 }, (_, i) => `${String(8 + Math.floor(i / 2)).padStart(2,'0')}:${i % 2 ? '30' : '00'}`);
+// Full-day 30-minute choices: 12:00 AM through 11:30 PM.
+const TIMES = Array.from({ length: 48 }, (_, i) => `${String(Math.floor(i / 2)).padStart(2,'0')}:${i % 2 ? '30' : '00'}`);
 const label = (time: string) => new Date(`2000-01-01T${time}:00`).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
 const step = (value:string, direction:number) => TIMES[(TIMES.indexOf(value)+direction+TIMES.length)%TIMES.length];
 export function ScheduleEditor({ value, onChange }:{value:ScheduleEntry[];onChange:(next:ScheduleEntry[])=>void}) {
- const [draft,setDraft]=useState<ScheduleEntry>({day:'Monday',start:'08:00',end:'09:00'});
+ const [draft,setDraft]=useState<ScheduleEntry>({day:'Monday',start:'07:00',end:'08:00'});
  const add=()=>{if(draft.start>=draft.end)return Alert.alert('Invalid time','The class end time must be after its start time.');if(value.some(x=>x.day===draft.day&&draft.start<x.end&&x.start<draft.end))return Alert.alert('Overlapping class',`This overlaps an existing ${draft.day} class.`);onChange([...value,draft].sort((a,b)=>DAYS.indexOf(a.day)-DAYS.indexOf(b.day)||a.start.localeCompare(b.start)));};
  return <View style={s.box}><Text style={s.title}>Class schedule</Text><Text style={s.help}>Optional. Add each class period.</Text>{value.map((x,i)=><View key={`${x.day}-${x.start}-${i}`} style={s.saved}><Text style={s.savedText}>{x.day} · {label(x.start)} – {label(x.end)}</Text><TouchableOpacity onPress={()=>onChange(value.filter((_,p)=>p!==i))}><Text style={s.remove}>Remove</Text></TouchableOpacity></View>)}<View style={s.days}>{DAYS.map(day=><TouchableOpacity key={day} onPress={()=>setDraft({...draft,day})} style={[s.day,draft.day===day&&s.active]}><Text style={[s.dayText,draft.day===day&&s.activeText]}>{day.slice(0,3)}</Text></TouchableOpacity>)}</View><View style={s.times}><Control label="Start" value={draft.start} change={start=>setDraft({...draft,start})}/><Control label="End" value={draft.end} change={end=>setDraft({...draft,end})}/></View><TouchableOpacity onPress={add} style={s.add}><Text style={s.addText}>+ Add class period</Text></TouchableOpacity></View>;
 }

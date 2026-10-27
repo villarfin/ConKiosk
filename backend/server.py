@@ -1158,7 +1158,7 @@ async def tv_status(db: AsyncSession = Depends(session)):
     output = []
     for faculty in (await db.scalars(select(Faculty).where(and_(Faculty.role.in_(["faculty", "it_chair"]), Faculty.is_approved == True, Faculty.is_deleted == False)).order_by(Faculty.full_name))).all():
         queue = (await db.scalars(select(QueueRecord).where(and_(QueueRecord.faculty_school_id == faculty.school_id, QueueRecord.status.in_(["waiting", "serving"]))).order_by(QueueRecord.queue_number))).all(); serving = next((item for item in queue if item.status == "serving"), None); waiting = [item for item in queue if item.status == "waiting"]
-        output.append({"school_id": faculty.school_id, "full_name": faculty.full_name, "department": faculty.department, "office_location": faculty.office_location, "profile_image": public_photo(faculty), "availability_status": faculty.availability_status, "now_serving": {"queue_id": serving.id, "queue_number": queue_label(serving.queue_number)} if serving else None, "waiting_count": len(waiting), "next_queue_numbers": [queue_label(item.queue_number) for item in waiting]})
+        output.append({"school_id": faculty.school_id, "full_name": faculty.full_name, "department": faculty.department, "office_location": faculty.office_location, "office_hours": faculty.office_hours or "Office hours not specified", "profile_image": public_photo(faculty), "availability_status": faculty.availability_status, "now_serving": {"queue_id": serving.id, "queue_number": queue_label(serving.queue_number)} if serving else None, "waiting_count": len(waiting), "next_queue_numbers": [queue_label(item.queue_number) for item in waiting]})
     return output
 @api.post("/seed")
 async def seed_demo_data(db: AsyncSession = Depends(session)):
