@@ -152,6 +152,8 @@ class ConsultationRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    pre_consultation_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    pre_consultation_accepting: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     students: Mapped[list] = mapped_column(JSON, default=list)
 
 class AuthSession(Base):
@@ -348,6 +350,25 @@ async def lock_faculty_queue(db: AsyncSession, faculty: Faculty) -> None:
     """Serialize all queue mutations for a faculty, including empty queues."""
     await db.execute(select(Faculty).where(Faculty.school_id == faculty.school_id).with_for_update())
 
+def begin_consultation(consultation: ConsultationRecord, faculty: Faculty) -> None:
+    """Mark a session active while retaining the faculty's manual setting."""
+    if consultation.pre_consultation_status is None:
+        consultation.pre_consultation_status = faculty.availability_status
+        consultation.pre_consultation_accepting = faculty.accepting_consultations
+    consultation.status = 'ongoing'
+    consultation.started_at = consultation.updated_at = now()
+    faculty.availability_status = 'busy'
+    faculty.accepting_consultations = True
+
+def restore_pre_consultation_availability(consultation: ConsultationRecord, faculty: Faculty) -> None:
+    """Restore the setting selected before this consultation began."""
+    if consultation.pre_consultation_status is None:
+        # Existing active sessions predate the saved-state columns.
+        faculty.availability_status, faculty.accepting_consultations = 'available', True
+        return
+    faculty.availability_status = consultation.pre_consultation_status
+    faculty.accepting_consultations = bool(consultation.pre_consultation_accepting)
+
 async def advance_queue(db: AsyncSession, faculty: Faculty) -> Optional[ConsultationRecord]:
     await db.flush()
     if await db.scalar(select(ConsultationRecord.id).where(and_(ConsultationRecord.faculty_school_id == faculty.school_id, ConsultationRecord.status == 'ongoing'))):
@@ -359,13 +380,8 @@ async def advance_queue(db: AsyncSession, faculty: Faculty) -> Optional[Consulta
     # A pending request must be accepted before its student can be called.
     if not consultation:
         return None
-    consultation.status = 'ongoing'
-    consultation.started_at = consultation.updated_at = now()
+    begin_consultation(consultation, faculty)
     head.status = 'serving'
-    faculty.availability_status = 'busy'
-    # Busy describes the consultation in progress; it must not silently close
-    # the faculty's queue.  Kiosk requests are still allowed while consulting.
-    faculty.accepting_consultations = True
     return consultation
 
 class Connections:
@@ -465,6 +481,8 @@ async def startup():
             SET last_number = GREATEST(global_queue_counter.last_number, EXCLUDED.last_number)"""))
         await conn.execute(text("""UPDATE consultations c SET students = (SELECT json_agg(json_build_object('student_id', ids.value, 'full_name', names.value)) FROM json_array_elements_text(q.student_ids) WITH ORDINALITY ids(value, n) JOIN json_array_elements_text(q.student_names) WITH ORDINALITY names(value,n) USING (n)) FROM queue q WHERE c.queue_id=q.id AND json_array_length(c.students)=0"""))
         await conn.execute(text("ALTER TABLE consultations ADD COLUMN IF NOT EXISTS started_at TIMESTAMP NULL"))
+        await conn.execute(text("ALTER TABLE consultations ADD COLUMN IF NOT EXISTS pre_consultation_status VARCHAR(32) NULL"))
+        await conn.execute(text("ALTER TABLE consultations ADD COLUMN IF NOT EXISTS pre_consultation_accepting BOOLEAN NULL"))
         await conn.execute(text("""
             WITH duplicates AS (
                 SELECT id, ROW_NUMBER() OVER (PARTITION BY queue_id
@@ -983,9 +1001,7 @@ async def request_action(request_id: str, payload: ConsultationAction, db: Async
             active = await db.scalar(select(ConsultationRecord.id).where(and_(ConsultationRecord.faculty_school_id == faculty.school_id, ConsultationRecord.status == 'ongoing')))
             waiting = await db.scalar(select(QueueRecord.id).where(and_(QueueRecord.faculty_school_id == faculty.school_id, QueueRecord.status == 'waiting')))
             if not active and not waiting and row.preferred_date <= local_today():
-                consultation.status = 'ongoing'
-                consultation.started_at = consultation.updated_at = now()
-                faculty.availability_status = 'busy'
+                begin_consultation(consultation, faculty)
                 started = consultation
         event = 'consultation_started' if started else 'consultation_accepted'
     elif payload.action == "decline":
@@ -1066,11 +1082,7 @@ async def consultation_start(consultation_id: str, db: AsyncSession = Depends(se
         linked_queue = await db.get(QueueRecord, row.queue_id)
         if not linked_queue or linked_queue.status != 'waiting':
             raise HTTPException(409, 'This queue ticket is no longer waiting')
-    row.status = "ongoing"; row.started_at = row.updated_at = now()
-    # A faculty member is Busy while serving, but remains open to new queue
-    # requests unless they explicitly choose Unavailable from the dashboard.
-    faculty.availability_status = "busy"
-    faculty.accepting_consultations = True
+    begin_consultation(row, faculty)
     if row.queue_id:
         queue = await db.get(QueueRecord, row.queue_id)
         if queue: queue.status = "serving"
@@ -1095,10 +1107,10 @@ async def consultation_complete(consultation_id: str, payload: Optional[Consulta
             await reset_queue_counter_if_empty(db, faculty.school_id)
     next_session = await advance_queue(db, faculty) if payload is None or payload.advance else None
     if not next_session:
-        # "Pause queue" stops automatic calling only.  It must not take a
-        # signed-in faculty offline or close the kiosk to new requests.
-        faculty.availability_status = 'available'
-        faculty.accepting_consultations = True
+        # "Pause queue" stops automatic calling only.  Restore exactly what
+        # this faculty selected before the session, rather than forcing a
+        # fixed Available or Unavailable state.
+        restore_pre_consultation_availability(row, faculty)
     await db.commit()
     availability_event = {"faculty_id": faculty.school_id, "status": faculty.availability_status, "accepting_consultations": faculty.accepting_consultations}
     for event in ("consultation_completed", "queue_updated"): await connections.send(event, {"faculty_id": faculty.school_id})

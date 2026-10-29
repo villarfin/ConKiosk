@@ -157,7 +157,7 @@ export default function HistoryScreen() {
       }
       const result = await ApiClient.post(`/consultations/${selectedConsultation._id}/complete`, { notes: editNotes, advance: pendingAction !== 'pause' });
       setPendingAction(null);
-      Alert.alert('Success', result.next_started ? 'Notes saved. Consultation completed and the next student has been called.' : 'Notes saved. Consultation completed. You are available and still accepting requests.');
+      Alert.alert('Success', result.next_started ? 'Notes saved. Consultation completed and the next student has been called.' : 'Notes saved. Consultation completed. Your previous availability setting has been restored.');
       closeDetails();
       loadHistory();
     } catch (error: any) {
@@ -399,7 +399,7 @@ export default function HistoryScreen() {
           </View>
         </View>
       </Modal>
-      <ActionDialog visible={Boolean(pendingAction)} title={pendingAction === 'cancel' ? 'Cancel consultation?' : 'Complete consultation?'} message={pendingAction === 'cancel' ? 'This action cannot be undone. Enter the cancellation reason.' : pendingAction === 'pause' ? 'Save your notes, complete this session and pause automatic queue advancement? You will remain Available and continue accepting requests.' : 'Save your notes, complete this session and call the next accepted student?'} confirmLabel="Confirm" destructive={pendingAction === 'cancel'} busy={saving} confirmDisabled={pendingAction === 'cancel' && !cancelReason.trim()} onConfirm={completeConsultation} onCancel={() => { if (!saving) setPendingAction(null); }}>{pendingAction === 'cancel' && <TextInput accessibilityLabel="Cancellation reason" value={cancelReason} onChangeText={setCancelReason} style={styles.textArea} placeholder="Reason for cancellation" maxLength={2000} />}</ActionDialog>
+      <ActionDialog visible={Boolean(pendingAction)} title={pendingAction === 'cancel' ? 'Cancel consultation?' : 'Complete consultation?'} message={pendingAction === 'cancel' ? 'This action cannot be undone. Enter the cancellation reason.' : pendingAction === 'pause' ? 'Save your notes, complete this session and pause automatic queue advancement? Your previous availability setting will be restored.' : 'Save your notes, complete this session and call the next accepted student?'} confirmLabel="Confirm" destructive={pendingAction === 'cancel'} busy={saving} confirmDisabled={pendingAction === 'cancel' && !cancelReason.trim()} onConfirm={completeConsultation} onCancel={() => { if (!saving) setPendingAction(null); }}>{pendingAction === 'cancel' && <TextInput accessibilityLabel="Cancellation reason" value={cancelReason} onChangeText={setCancelReason} style={styles.textArea} placeholder="Reason for cancellation" maxLength={2000} />}</ActionDialog>
     </SafeAreaView>
   );
 }
