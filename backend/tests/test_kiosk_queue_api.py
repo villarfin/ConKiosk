@@ -304,6 +304,24 @@ class TestStartComplete:
         rp = api_client.get(f"{BASE_URL}/api/faculty/profile", headers=headers)
         assert rp.status_code == 200
         assert rp.json()["availability_status"] == "busy"
+        assert rp.json()["accepting_consultations"] is True
+
+    def test_pause_queue_keeps_faculty_available_and_accepting(self, api_client,
+                                                                fresh_kiosk_flow):
+        headers = fresh_kiosk_flow["headers"]
+        consultation_id = fresh_kiosk_flow["consultation_id"]
+
+        response = api_client.post(
+            f"{BASE_URL}/api/consultations/{consultation_id}/complete",
+            json={"advance": False, "notes": "Pause automatic advancement"},
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+
+        profile = api_client.get(f"{BASE_URL}/api/faculty/profile", headers=headers)
+        assert profile.status_code == 200
+        assert profile.json()["availability_status"] == "available"
+        assert profile.json()["accepting_consultations"] is True
 
     def test_complete_consultation_sets_available_and_completed(self, api_client,
                                                                  fresh_kiosk_flow):

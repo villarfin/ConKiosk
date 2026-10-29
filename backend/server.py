@@ -363,6 +363,9 @@ async def advance_queue(db: AsyncSession, faculty: Faculty) -> Optional[Consulta
     consultation.started_at = consultation.updated_at = now()
     head.status = 'serving'
     faculty.availability_status = 'busy'
+    # Busy describes the consultation in progress; it must not silently close
+    # the faculty's queue.  Kiosk requests are still allowed while consulting.
+    faculty.accepting_consultations = True
     return consultation
 
 class Connections:
@@ -1063,7 +1066,11 @@ async def consultation_start(consultation_id: str, db: AsyncSession = Depends(se
         linked_queue = await db.get(QueueRecord, row.queue_id)
         if not linked_queue or linked_queue.status != 'waiting':
             raise HTTPException(409, 'This queue ticket is no longer waiting')
-    row.status = "ongoing"; row.started_at = row.updated_at = now(); faculty.availability_status = "busy"
+    row.status = "ongoing"; row.started_at = row.updated_at = now()
+    # A faculty member is Busy while serving, but remains open to new queue
+    # requests unless they explicitly choose Unavailable from the dashboard.
+    faculty.availability_status = "busy"
+    faculty.accepting_consultations = True
     if row.queue_id:
         queue = await db.get(QueueRecord, row.queue_id)
         if queue: queue.status = "serving"
@@ -1087,9 +1094,15 @@ async def consultation_complete(consultation_id: str, payload: Optional[Consulta
             queue.status = "completed"
             await reset_queue_counter_if_empty(db, faculty.school_id)
     next_session = await advance_queue(db, faculty) if payload is None or payload.advance else None
-    if not next_session: faculty.availability_status = 'unavailable' if payload and not payload.advance else 'available'
+    if not next_session:
+        # "Pause queue" stops automatic calling only.  It must not take a
+        # signed-in faculty offline or close the kiosk to new requests.
+        faculty.availability_status = 'available'
+        faculty.accepting_consultations = True
     await db.commit()
-    for event in ("consultation_completed", "queue_updated", "availability_changed"): await connections.send(event, {"faculty_id": faculty.school_id})
+    availability_event = {"faculty_id": faculty.school_id, "status": faculty.availability_status, "accepting_consultations": faculty.accepting_consultations}
+    for event in ("consultation_completed", "queue_updated"): await connections.send(event, {"faculty_id": faculty.school_id})
+    await connections.send("availability_changed", availability_event)
     return {"message": "Consultation completed", "duration_minutes": row.duration, "next_started": bool(next_session)}
 
 @api.post('/consultations/{consultation_id}/cancel')

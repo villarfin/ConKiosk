@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { Alert, Platform } from 'react-native';
 import { timedFetch } from '@/src/utils/network';
 import { storage } from '@/src/utils/storage';
 import { RealtimeClient } from '@/src/utils/realtime';
@@ -69,6 +70,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (event.type === 'role_changed' && token) {
         void timedFetch(apiUrl('/faculty/profile'), { headers: { Authorization: `Bearer ${token}` } }).then(async response => { if (response.ok) updateFaculty(await response.json()); }).catch(() => {});
       }
+    });
+  }, [realtime]);
+
+  // The server delivers targeted `new_notification` events over the
+  // authenticated WebSocket.  Surface those events immediately instead of
+  // requiring the faculty member to open the Notifications tab or refresh it.
+  useEffect(() => {
+    if (!realtime) return;
+    return realtime.subscribe((event) => {
+      if (event.type !== 'new_notification') return;
+
+      const queueNumber = event.data?.queue_number;
+      const title = 'New consultation request';
+      const body = queueNumber ? `A student joined your queue (#${queueNumber}).` : 'You have a new consultation request.';
+      const BrowserNotification = (globalThis as any).Notification;
+
+      // Browser notifications are the available OS-level notification channel
+      // for the deployed web/PWA build.  Native background push needs a
+      // provider/device-token setup and is intentionally not faked here.
+      if (Platform.OS === 'web' && BrowserNotification) {
+        if (BrowserNotification.permission === 'granted') {
+          new BrowserNotification(title, { body });
+          return;
+        }
+        if (BrowserNotification.permission === 'default') {
+          void BrowserNotification.requestPermission().then((permission: string) => {
+            if (permission === 'granted') new BrowserNotification(title, { body });
+            else Alert.alert(title, body);
+          }).catch(() => Alert.alert(title, body));
+          return;
+        }
+      }
+      Alert.alert(title, body);
     });
   }, [realtime]);
 
