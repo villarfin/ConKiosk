@@ -9,7 +9,7 @@ let announcementAudioContext: AudioContext | null = null;
 
 interface NowServing { queue_number: string; student_names: string[]; topic: string; }
 interface FacultyStatus {
-  school_id: string; full_name: string; office_location: string; office_hours: string; availability_status: string;
+  school_id: string; full_name: string; role: 'faculty' | 'it_chair'; office_location: string; office_hours: string; availability_status: string;
   profile_image?: string;
   now_serving: NowServing | null; waiting_count: number; next_queue_numbers: string[];
 }
@@ -135,7 +135,9 @@ export default function TVDisplay() {
   const compact = width < 1000 || height < 700;
   // Measure the area beside the queue panel, then choose the grid that keeps
   // the existing card design largest while fitting every faculty at once.
-  const count = Math.max(1, faculty.length);
+  const chair = faculty.find(person => person.role === 'it_chair');
+  const otherFaculty = faculty.filter(person => person.role !== 'it_chair');
+  const count = Math.max(1, otherFaculty.length);
   let facultyColumns = 1;
   let cardScale = 0;
   for (let columns = 1; columns <= count; columns++) {
@@ -168,13 +170,11 @@ export default function TVDisplay() {
       <View style={styles.board}>
         <View style={styles.facultyArea}>
           <View style={styles.facultySectionHeader}><View><Text style={styles.sectionEyebrow}>MEET YOUR INSTRUCTORS</Text><Text style={styles.sectionTitle}>Faculty availability</Text></View><View style={styles.liveBadge}><View style={styles.liveDot} /><Text style={styles.liveText}>LIVE</Text></View></View>
-          <View style={[styles.facultyGrid, { flex: 1, minHeight: 0, gap: 0 }]} onLayout={({ nativeEvent: { layout } }) => setFacultySpace(previous => previous.width === layout.width && previous.height === layout.height ? previous : { width: layout.width, height: layout.height })}>{faculty.map(person => {
-            const color = person.availability_status === 'available' ? '#15803D' : person.availability_status === 'busy' ? '#B8860B' : '#B91C1C';
-            return <View key={person.school_id} style={{ width: slotWidth, height: slotHeight, alignItems: 'center', justifyContent: 'center' }}><View style={[styles.facultyTile, { width: 330, height: 158, flexShrink: 0, borderLeftColor: color, transform: [{ scale: cardScale }] }]}>
-              <View style={[styles.profileCircle, { borderColor: color }]}>{person.profile_image ? <Image source={{ uri: photoUrl(person.profile_image) }} accessibilityLabel={`${person.full_name} profile photo`} style={styles.profilePhoto} /> : <Ionicons name="person" size={26} color="#C8A348" />}</View>
-              <View style={styles.facultyDetails}><Text style={styles.facultyCardName} numberOfLines={2}>{person.full_name}</Text><View style={styles.facultyOfficeRow}><Ionicons name="location-outline" size={13} color="#64748B" /><Text style={styles.facultyCardOffice} numberOfLines={1}>{person.office_location || 'Office not specified'}</Text></View><View style={styles.facultyOfficeRow}><Ionicons name="time-outline" size={13} color="#64748B" /><Text style={styles.facultyHours} numberOfLines={2}>{person.office_hours}</Text></View><View style={styles.facultyStatusRow}><View style={[styles.availabilityDot, { backgroundColor: color }]} /><Text style={[styles.facultyStatusText, { color }]}>{person.availability_status.toUpperCase()}</Text></View></View>
-            </View></View>;
-          })}</View>
+          {chair && <View style={[styles.chairArea, compact && styles.chairAreaCompact]}>
+            <View style={styles.chairLabel}><Ionicons name="star" size={14} color="#D6B45F" /><Text style={styles.chairLabelText}>IT CHAIR</Text></View>
+            <FacultyCard person={chair} featured compact={compact} />
+          </View>}
+          <View style={[styles.facultyGrid, { flex: 1, minHeight: 0, gap: 0 }]} onLayout={({ nativeEvent: { layout } }) => setFacultySpace(previous => previous.width === layout.width && previous.height === layout.height ? previous : { width: layout.width, height: layout.height })}>{otherFaculty.map(person => <View key={person.school_id} style={{ width: slotWidth, height: slotHeight, alignItems: 'center', justifyContent: 'center' }}><FacultyCard person={person} scale={cardScale} /></View>)}</View>
         </View>
         <View style={[styles.queueCard, { width: Math.min(520, width * 0.36) }]}>
           <Text style={styles.queueTitle}>CONSULTATION QUEUE</Text>
@@ -192,6 +192,14 @@ export default function TVDisplay() {
       <View style={styles.footer}><Text style={[styles.footerText, (connectionFailed || !lastUpdated || now.getTime() - lastUpdated > 10000) && { color: '#FDE047' }]}>{connectionFailed || !lastUpdated || now.getTime() - lastUpdated > 10000 ? 'SERVER UNREACHABLE · Displaying last received queue' : 'LIVE QUEUE BOARD · Updates automatically'}</Text><Text style={styles.footerText}>{faculty.length} faculty · {serving.length} being served</Text></View>
     </SafeAreaView>
   );
+}
+
+function FacultyCard({ person, scale = 1, featured = false, compact = false }: { person: FacultyStatus; scale?: number; featured?: boolean; compact?: boolean }) {
+  const color = person.availability_status === 'available' ? '#15803D' : person.availability_status === 'busy' ? '#B8860B' : '#B91C1C';
+  return <View style={[styles.facultyTile, featured && styles.chairCard, featured && compact && styles.chairCardCompact, { borderLeftColor: color, transform: [{ scale }] }]}>
+    <View style={[styles.profileCircle, featured && styles.chairProfileCircle, { borderColor: color }]}>{person.profile_image ? <Image source={{ uri: photoUrl(person.profile_image) }} accessibilityLabel={`${person.full_name} profile photo`} style={styles.profilePhoto} /> : <Ionicons name="person" size={featured ? 34 : 26} color="#C8A348" />}</View>
+    <View style={styles.facultyDetails}><Text style={[styles.facultyCardName, featured && styles.chairCardName]} numberOfLines={2}>{person.full_name}</Text><View style={styles.facultyOfficeRow}><Ionicons name="location-outline" size={13} color="#64748B" /><Text style={styles.facultyCardOffice} numberOfLines={1}>{person.office_location || 'Office not specified'}</Text></View><View style={styles.facultyOfficeRow}><Ionicons name="time-outline" size={13} color="#64748B" /><Text style={styles.facultyHours} numberOfLines={2}>{person.office_hours}</Text></View><View style={styles.facultyStatusRow}><View style={[styles.availabilityDot, { backgroundColor: color }]} /><Text style={[styles.facultyStatusText, { color }]}>{person.availability_status.toUpperCase()}</Text></View></View>
+  </View>;
 }
 
 const styles = StyleSheet.create({
@@ -215,7 +223,7 @@ const styles = StyleSheet.create({
   queueNumberLabel: { color: '#8A681F', fontSize: 13, fontWeight: '800', letterSpacing: 1.5, marginTop: 8 },
   largeQueueNumber: { color: '#172747', fontSize: 82, lineHeight: 90, fontWeight: '900', textAlign: 'center', width: '100%', fontVariant: ['tabular-nums'] },
   nextQueueLine: { color: '#334155', fontSize: 21, fontWeight: '700', marginTop: 4 },
-  facultyArea: { flex: 1, padding: 20, overflow: 'hidden' }, facultyGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 18 }, facultyTile: { width: '47%', flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, backgroundColor: '#FFFFFF', borderRadius: 12, borderLeftWidth: 6, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } }, availabilityDot: { width: 7, height: 7, borderRadius: 4 },
+  facultyArea: { flex: 1, padding: 20, overflow: 'hidden' }, chairArea: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 174, marginTop: 14, padding: 12, borderRadius: 14, backgroundColor: '#172747', borderWidth: 1, borderColor: '#C8A348' }, chairAreaCompact: { minHeight: 140, marginTop: 10, padding: 8 }, chairLabel: { alignItems: 'center', gap: 5, width: 54 }, chairLabelText: { color: '#D6B45F', fontSize: 10, fontWeight: '900', letterSpacing: 1.2, textAlign: 'center' }, facultyGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 18 }, facultyTile: { width: 330, height: 158, flexShrink: 0, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, backgroundColor: '#FFFFFF', borderRadius: 12, borderLeftWidth: 6, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } }, chairCard: { flex: 1, width: undefined as any, height: 148, borderColor: '#D6B45F', borderWidth: 2, backgroundColor: '#FFFEF8' }, chairCardCompact: { height: 116, padding: 12 }, chairProfileCircle: { width: 70, height: 70, borderRadius: 35, borderWidth: 3 }, chairCardName: { fontSize: 27 }, availabilityDot: { width: 7, height: 7, borderRadius: 4 },
   queueCard: { alignSelf: 'stretch', margin: 12, flexShrink: 0, backgroundColor: '#F4F1E9', borderRadius: 16, overflow: 'hidden', padding: 14, borderWidth: 2, borderColor: '#C8A348' }, queueTitle: { fontSize: 18, fontWeight: '900', color: '#172747', marginBottom: 10 }, queueTableHeading: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 2, borderBottomColor: '#CBD5E1', paddingBottom: 8 }, queueHeadingText: { fontSize: 9, fontWeight: '800', color: '#475569' }, queueTableRow: { height: 72, flexDirection: 'row', alignItems: 'center', gap: 8, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' }, tableQueueNumber: { color: '#172747', fontSize: 29, fontWeight: '900' }, tableNext: { color: '#475569', fontSize: 10, maxWidth: 155 }, queueCardFooter: { color: '#475569', fontSize: 10, paddingTop: 8 },
   container: { flex: 1, backgroundColor: '#101D35', overflow: 'hidden' }, loading: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#101D35' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 92, paddingHorizontal: 28, backgroundColor: '#101D35', borderBottomWidth: 3, borderBottomColor: '#C8A348' }, headerCompact: { minHeight: 66, paddingHorizontal: 14 }, brand: { color: '#FFFFFF', fontSize: 29, fontWeight: '900' }, brandCompact: { fontSize: 20 }, subtitle: { color: '#CBD5E1', fontSize: 11, fontWeight: '800', letterSpacing: 1.2 }, headerCenter: { flex: 1, alignItems: 'center' }, headerMessage: { color: '#E0BD65', fontSize: 17, fontWeight: '800' }, headerMessageCompact: { fontSize: 12 },

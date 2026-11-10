@@ -149,19 +149,29 @@ export default function DashboardScreen() {
             <Text style={styles.name}>{faculty?.full_name}</Text>
             <Text style={styles.department}>{faculty?.department}</Text>
           </View>
-          <View style={styles.profileImageContainer}>
-            {faculty?.profile_image ? (
-              <Image
-                source={{ uri: faculty.profile_image }}
-                style={styles.profileImage}
-              />
-            ) : (
-              <View style={styles.profileImagePlaceholder}>
-                <Text style={styles.profileImageText}>
-                  {faculty?.full_name?.charAt(0) || 'F'}
-                </Text>
-              </View>
-            )}
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Open notifications"
+              style={styles.notificationButton}
+              onPress={() => router.push('/(tabs)/notifications')}
+            >
+              <Ionicons name="notifications-outline" size={26} color="#1A1A1A" />
+            </TouchableOpacity>
+            <View style={styles.profileImageContainer}>
+              {faculty?.profile_image ? (
+                <Image
+                  source={{ uri: faculty.profile_image }}
+                  style={styles.profileImage}
+                />
+              ) : (
+                <View style={styles.profileImagePlaceholder}>
+                  <Text style={styles.profileImageText}>
+                    {faculty?.full_name?.charAt(0) || 'F'}
+                  </Text>
+                </View>
+              )}
+            </View>
           </View>
         </View>
 
@@ -235,62 +245,21 @@ export default function DashboardScreen() {
             <Text style={styles.statLabel}>Completed Today</Text>
           </View>
 
-          <View style={[styles.statCard, { backgroundColor: '#FFF3E0' }]}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="View pending requests"
+            style={[styles.statCard, { backgroundColor: '#FFF3E0' }]}
+            onPress={() => router.push('/(tabs)/requests')}
+          >
             <Ionicons name="mail-outline" size={32} color="#FF9800" />
             <Text style={styles.statValue}>{stats?.pending_requests || 0}</Text>
             <Text style={styles.statLabel}>Pending Requests</Text>
-          </View>
+          </TouchableOpacity>
 
           <View style={[styles.statCard, { backgroundColor: '#E8F5E9' }]}>
             <Ionicons name="checkmark-done-outline" size={32} color="#4CAF50" />
             <Text style={styles.statValue}>{stats?.monthly_count || 0}</Text>
             <Text style={styles.statLabel}>Completed This Month</Text>
-          </View>
-        </View>
-
-        {/* Quick Actions */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.quickActions}>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => router.push('/(tabs)/requests')}
-            >
-              <View style={[styles.actionIcon, { backgroundColor: '#E3F2FD' }]}>
-                <Ionicons name="mail" size={24} color="#2196F3" />
-              </View>
-              <Text style={styles.actionText}>View Requests</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => router.push('/(tabs)/history')}
-            >
-              <View style={[styles.actionIcon, { backgroundColor: '#F3E5F5' }]}>
-                <Ionicons name="time" size={24} color="#9C27B0" />
-              </View>
-              <Text style={styles.actionText}>History</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => router.push('/(tabs)/notifications')}
-            >
-              <View style={[styles.actionIcon, { backgroundColor: '#FFF3E0' }]}>
-                <Ionicons name="notifications" size={24} color="#FF9800" />
-              </View>
-              <Text style={styles.actionText}>Notifications</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => router.push('/(tabs)/profile')}
-            >
-              <View style={[styles.actionIcon, { backgroundColor: '#E8F5E9' }]}>
-                <Ionicons name="person" size={24} color="#4CAF50" />
-              </View>
-              <Text style={styles.actionText}>Profile</Text>
-            </TouchableOpacity>
           </View>
         </View>
 
@@ -351,6 +320,19 @@ const styles = StyleSheet.create({
   },
   headerLeft: {
     flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  notificationButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    marginRight: 12,
   },
   greeting: {
     fontSize: 16,
@@ -506,27 +488,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1A1A1A',
     marginBottom: 12,
-  },
-  quickActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  actionButton: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  actionIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  actionText: {
-    fontSize: 12,
-    color: '#1A1A1A',
-    textAlign: 'center',
   },
   consultationCard: {
     backgroundColor: '#FFFFFF',
