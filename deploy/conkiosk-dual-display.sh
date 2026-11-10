@@ -7,7 +7,10 @@ set -eu
 # The touchscreen runs on this Pi, so it must never wait for external or
 # LAN DNS. Faculty devices use conkiosk.local separately.
 KIOSK_URL="http://127.0.0.1/kiosk"
-TV_URL="http://127.0.0.1/tv"
+# Versioned URL prevents Chromium from restoring an older cached TV bundle
+# after the kiosk starts. Keep this URL local so the HDMI-A-2 display does not
+# depend on LAN DNS.
+TV_URL="http://127.0.0.1/tv?display-build=chair-grid-v2"
 KIOSK_PROFILE="$HOME/.local/share/conkiosk-kiosk-browser"
 TV_PROFILE="$HOME/.local/share/conkiosk-tv-browser"
 # Required for Chromium on Wayland to request Squeekboard for focused text
