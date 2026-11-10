@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Image,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,6 +25,7 @@ interface Faculty {
   accepting_consultations: boolean;
   office_hours?: string;
   profile_image?: string;
+  role?: 'faculty' | 'it_chair';
 }
 
 export default function KioskHome() {
@@ -31,6 +33,7 @@ export default function KioskHome() {
   const [faculty, setFaculty] = useState<Faculty[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedChair, setSelectedChair] = useState<Faculty | null>(null);
 
   const loadFaculty = useCallback(async () => {
     try {
@@ -85,6 +88,11 @@ export default function KioskHome() {
 
   const handleSelectFaculty = (f: Faculty) => {
     if (!canRequest(f)) return;
+    if (f.role === 'it_chair') { setSelectedChair(f); return; }
+    beginStudentRequest(f);
+  };
+
+  const beginStudentRequest = (f: Faculty) => {
     router.push({
       pathname: '/kiosk/identify',
       params: {
@@ -94,6 +102,12 @@ export default function KioskHome() {
         faculty_office: f.office_location,
       },
     });
+  };
+
+  const beginGuestRequest = (f: Faculty) => {
+    setSelectedChair(null);
+    // The Expo typed-route manifest is regenerated when the app starts.
+    router.push({ pathname: '/kiosk/guest' as any, params: { faculty_school_id: f.school_id, faculty_name: f.full_name, faculty_office: f.office_location } });
   };
 
   if (loading) {
@@ -196,6 +210,22 @@ export default function KioskHome() {
           ))}
         </View>
       </ScrollView>
+      <Modal transparent visible={Boolean(selectedChair)} animationType="fade" onRequestClose={() => setSelectedChair(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.choiceModal} accessibilityViewIsModal accessibilityLabel="Choose visitor type">
+            <Ionicons name="people-circle-outline" size={42} color="#1D4ED8" />
+            <Text style={styles.choiceTitle}>Who is consulting the IT Chair?</Text>
+            <Text style={styles.choiceHint}>Choose the option that best describes you.</Text>
+            <TouchableOpacity testID="chair-student-option" style={styles.choiceButton} onPress={() => { if (selectedChair) { const chair = selectedChair; setSelectedChair(null); beginStudentRequest(chair); } }}>
+              <Ionicons name="school-outline" size={24} color="#1D4ED8" /><View style={styles.choiceText}><Text style={styles.choiceButtonTitle}>Student</Text><Text style={styles.choiceButtonHint}>Use your student ID to request a consultation.</Text></View><Ionicons name="chevron-forward" size={22} color="#64748B" />
+            </TouchableOpacity>
+            <TouchableOpacity testID="chair-guest-option" style={styles.choiceButton} onPress={() => { if (selectedChair) beginGuestRequest(selectedChair); }}>
+              <Ionicons name="briefcase-outline" size={24} color="#1D4ED8" /><View style={styles.choiceText}><Text style={styles.choiceButtonTitle}>Guest / Visitor</Text><Text style={styles.choiceButtonHint}>For signatures and other non-student concerns.</Text></View><Ionicons name="chevron-forward" size={22} color="#64748B" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setSelectedChair(null)} style={styles.cancelChoice}><Text style={styles.cancelChoiceText}>Cancel</Text></TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -301,4 +331,11 @@ const styles = StyleSheet.create({
   },
   selectHintText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
   unavailableHint: { color: '#8A4B00', fontSize: 13, textAlign: 'center', marginTop: 12 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.45)', justifyContent: 'center', padding: 24 },
+  choiceModal: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 24, alignItems: 'center' },
+  choiceTitle: { marginTop: 12, color: '#0F172A', fontSize: 21, fontWeight: '800', textAlign: 'center' },
+  choiceHint: { color: '#64748B', fontSize: 14, textAlign: 'center', marginTop: 6, marginBottom: 18 },
+  choiceButton: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 14, padding: 15, marginTop: 10 },
+  choiceText: { flex: 1 }, choiceButtonTitle: { color: '#0F172A', fontSize: 16, fontWeight: '700' }, choiceButtonHint: { color: '#64748B', fontSize: 12, marginTop: 2 },
+  cancelChoice: { paddingTop: 18, paddingBottom: 2 }, cancelChoiceText: { color: '#475569', fontSize: 15, fontWeight: '700' },
 });

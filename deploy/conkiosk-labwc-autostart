@@ -4,5 +4,5 @@
 
 /home/conkiosk/.local/bin/conkiosk-dual-display >/home/conkiosk/.cache/conkiosk-dual-display.log 2>&1 &
 
-# Preserve normal display wake/sleep behavior outside active use.
-swayidle -w timeout 600 'wlopm --off \*' resume 'wlopm --on \*' &
+# Keep both kiosk displays awake continuously.  Do not start swayidle here:
+# an idle timeout would power off the screens after ten minutes.

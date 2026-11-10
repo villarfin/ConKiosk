@@ -4,6 +4,8 @@
 
 set -eu
 
+# The touchscreen runs on this Pi, so it must never wait for external or
+# LAN DNS. Faculty devices use conkiosk.local separately.
 KIOSK_URL="http://127.0.0.1/kiosk"
 TV_URL="http://127.0.0.1/tv"
 KIOSK_PROFILE="$HOME/.local/share/conkiosk-kiosk-browser"
@@ -13,6 +15,9 @@ TV_PROFILE="$HOME/.local/share/conkiosk-tv-browser"
 # ConKiosk screens do not store user credentials. Avoid GNOME Keyring so a
 # kiosk boot never opens an "Unlock Keyring" dialog.
 CHROMIUM_WAYLAND_FLAGS="--ozone-platform=wayland --enable-features=UseOzonePlatform,VirtualKeyboard --enable-wayland-ime --wayland-text-input-version=3 --password-store=basic"
+# The kiosk is a single local page. Disable Chromium services that repeatedly
+# fetch/update background components and keep its disposable cache small.
+KIOSK_PERFORMANCE_FLAGS="--disable-background-networking --disable-component-update --disable-sync --disable-extensions --disable-component-extensions-with-background-pages --disable-features=MediaRouter --disk-cache-size=10485760 --media-cache-size=1048576"
 
 mkdir -p "$KIOSK_PROFILE" "$TV_PROFILE"
 
@@ -65,7 +70,7 @@ configure_outputs
 # This script is run only by Labwc's single autostart entry. Do not use pgrep
 # here: it can match the launcher itself and prevent either window from opening.
 focus_hdmi1
-chromium $CHROMIUM_WAYLAND_FLAGS \
+chromium $CHROMIUM_WAYLAND_FLAGS $KIOSK_PERFORMANCE_FLAGS \
   --class=conkiosk-kiosk --no-first-run --disable-session-crashed-bubble \
   --disable-infobars --user-data-dir="$KIOSK_PROFILE" "$KIOSK_URL" >/dev/null 2>&1 &
 

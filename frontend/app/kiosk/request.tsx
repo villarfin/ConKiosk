@@ -38,13 +38,15 @@ export default function RequestScreen() {
     students: string;
   }>();
 
-  const { students, submissionId } = getKioskDraft();
-  const [topic, setTopic] = useState('');
-  const [customTopic, setCustomTopic] = useState(false);
+  const { students, visitor, submissionId } = getKioskDraft();
+  // A visitor's stated reason is also their initial request topic, avoiding
+  // duplicate data entry for signature and other walk-in requests.
+  const [topic, setTopic] = useState(visitor?.purpose || '');
+  const [customTopic, setCustomTopic] = useState(Boolean(visitor));
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async () => {
-    if (!students.length) { Alert.alert('Student details needed', 'Please return to the kiosk and identify the student again.'); return; }
+    if (!students.length && !visitor) { Alert.alert('Visitor details needed', 'Please return to the kiosk and identify the visitor again.'); return; }
     if (!topic.trim()) {
       Alert.alert('Missing Topic', 'Please describe your consultation topic');
       return;
@@ -62,6 +64,7 @@ export default function RequestScreen() {
           topic: topic.trim(),
           consultation_type: params.consultation_type,
           students: students,
+          visitor: visitor || undefined,
           submission_id: submissionId,
         }),
       });
@@ -122,11 +125,12 @@ export default function RequestScreen() {
             </View>
           </View>
 
-          {/* Students Summary */}
+          {/* Visitor or students summary */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>
-              {params.consultation_type === 'group' ? `Group (${students.length} members)` : 'Student'}
+              {visitor ? 'Guest / Visitor' : params.consultation_type === 'group' ? `Group (${students.length} members)` : 'Student'}
             </Text>
+            {visitor && <View style={styles.studentRow}><View style={styles.studentAvatar}><Ionicons name="briefcase-outline" size={20} color="#FFF" /></View><View style={{ flex: 1 }}><Text style={styles.studentName}>{visitor.full_name}</Text><Text style={styles.studentMeta}>{visitor.purpose}</Text></View></View>}
             {students.map((s, i) => (
               <View key={i} style={styles.studentRow}>
                 <View style={styles.studentAvatar}>
@@ -262,7 +266,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 14,
-    fontSize: 15,
+    fontSize: 18,
     minHeight: 120,
     borderWidth: 1,
     borderColor: '#E0E0E0',

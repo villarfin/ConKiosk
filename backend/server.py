@@ -263,8 +263,12 @@ class AdminPasswordConfirmation(BaseModel):
     admin_password: str = Field(min_length=1, max_length=512)
     delete_history: bool = False
 class Student(BaseModel): student_id: str; full_name: str; program: str = ""; year_level: str; section: str
+class KioskVisitor(BaseModel):
+    full_name: str = Field(min_length=1, max_length=255)
+    purpose: str = Field(min_length=1, max_length=300)
 class KioskConsultationRequest(BaseModel):
-    faculty_school_id: str; topic: str; consultation_type: str = 'individual'; students: list[Student] = Field(min_length=1, max_length=30)
+    faculty_school_id: str; topic: str; consultation_type: str = 'individual'; students: list[Student] = Field(default_factory=list, max_length=30)
+    visitor: Optional[KioskVisitor] = None
     submission_id: Optional[str] = None
 class AdminFacultyUpdate(BaseModel):
     full_name: Optional[str] = Field(default=None, max_length=255)
@@ -876,7 +880,7 @@ async def delete_archive_faculty(school_id: str, payload: AdminPasswordConfirmat
 @api.get("/kiosk/faculty")
 async def kiosk_faculty(db: AsyncSession = Depends(session)):
     rows = (await db.scalars(select(Faculty).where(and_(Faculty.role.in_(["faculty", "it_chair"]), Faculty.is_approved == True)).order_by(Faculty.full_name))).all()
-    return [{**{key: getattr(row, key) for key in ('school_id', 'full_name', 'department', 'office_location', 'availability_status', 'accepting_consultations', 'office_hours')}, 'profile_image': public_photo(row)} for row in rows if not row.is_deleted]
+    return [{**{key: getattr(row, key) for key in ('school_id', 'full_name', 'department', 'office_location', 'availability_status', 'accepting_consultations', 'office_hours', 'role')}, 'profile_image': public_photo(row)} for row in rows if not row.is_deleted]
 @api.get("/kiosk/students/{student_id}", dependencies=[Depends(trusted_kiosk)])
 async def student_lookup(student_id: str, db: AsyncSession = Depends(session)):
     row = await db.scalar(select(StudentRecord).where(StudentRecord.student_id == student_id))
@@ -889,7 +893,9 @@ async def student_create(payload: Student, db: AsyncSession = Depends(session)):
     return {"message": "Student already registered" if row else "Student registered", "student": payload.model_dump()}
 @api.post("/kiosk/consultation-request")
 async def kiosk_request(payload: KioskConsultationRequest, db: AsyncSession = Depends(session)):
-    if payload.consultation_type not in {'individual', 'group'} or (payload.consultation_type == 'individual' and len(payload.students) != 1): raise HTTPException(422, 'Choose individual for one student or group for multiple students')
+    is_visitor = payload.visitor is not None
+    if is_visitor and payload.students: raise HTTPException(422, 'A guest request cannot include student details')
+    if not is_visitor and (payload.consultation_type not in {'individual', 'group'} or (payload.consultation_type == 'individual' and len(payload.students) != 1)): raise HTTPException(422, 'Choose individual for one student or group for multiple students')
     if len({s.student_id for s in payload.students}) != len(payload.students): raise HTTPException(422, 'Each student may only be listed once')
     payload_hash = hashlib.sha256(payload.model_dump_json(exclude={'submission_id'}).encode()).hexdigest()
     if payload.submission_id:
@@ -900,11 +906,12 @@ async def kiosk_request(payload: KioskConsultationRequest, db: AsyncSession = De
         if receipt:
             if receipt.payload_hash != payload_hash: raise HTTPException(409, 'This submission identifier has already been used')
             return receipt.result
-    if not payload.topic.strip() or not payload.students: raise HTTPException(422, "Topic and at least one student are required")
+    if not payload.topic.strip() or (not payload.students and not is_visitor): raise HTTPException(422, "Topic and at least one student are required")
     faculty = await db.scalar(select(Faculty).where(Faculty.school_id == payload.faculty_school_id).with_for_update())
     if not faculty: raise HTTPException(404, "Faculty not found")
     if faculty.role not in {'faculty', 'it_chair'} or not faculty.is_approved or faculty.availability_status == 'unavailable' or (faculty.availability_status == 'busy' and not faculty.accepting_consultations):
         raise HTTPException(409, 'This faculty is not accepting consultations')
+    if is_visitor and faculty.role != 'it_chair': raise HTTPException(403, 'Guest requests are only available for the IT Chair')
     for student in sorted(payload.students, key=lambda item: item.student_id):
         await db.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:key, 1))'), {'key': student.student_id})
         record = await db.scalar(select(StudentRecord).where(StudentRecord.student_id == student.student_id))
@@ -930,9 +937,13 @@ async def kiosk_request(payload: KioskConsultationRequest, db: AsyncSession = De
     number = await db.scalar(update(GlobalQueueCounter).where(GlobalQueueCounter.id == 1).values(last_number=GlobalQueueCounter.last_number + 1).returning(GlobalQueueCounter.last_number))
     if number is None: raise HTTPException(503, 'Queue numbering is not ready. Please retry shortly.')
     names = [student.full_name for student in payload.students]; ids = [student.student_id for student in payload.students]
-    queue = QueueRecord(faculty_school_id=faculty.school_id, queue_number=number, student_ids=ids, student_names=names, student_details=[student.model_dump() for student in payload.students], topic=payload.topic, consultation_type=payload.consultation_type)
+    if is_visitor: names, ids = [payload.visitor.full_name], ['GUEST']
+    details = [student.model_dump() for student in payload.students] if not is_visitor else [{'visitor_type': 'guest', **payload.visitor.model_dump()}]
+    request_type = 'guest' if is_visitor else payload.consultation_type
+    queue = QueueRecord(faculty_school_id=faculty.school_id, queue_number=number, student_ids=ids, student_names=names, student_details=details, topic=payload.topic, consultation_type=request_type)
     db.add(queue); await db.flush(); display = names[0] if len(names) == 1 else f"{names[0]} +{len(names)-1} more"
-    db.add(ConsultationRequestRecord(faculty_school_id=faculty.school_id, student_id=",".join(ids), student_name=display, student_program=f"{payload.students[0].program} • {payload.students[0].year_level} - {payload.students[0].section}", topic=payload.topic, preferred_date=local_today(), preferred_time="Walk-in", queue_id=queue.id, queue_number=queue.queue_number, consultation_type=payload.consultation_type))
+    descriptor = 'Guest / Visitor' if is_visitor else f"{payload.students[0].program} • {payload.students[0].year_level} - {payload.students[0].section}"
+    db.add(ConsultationRequestRecord(faculty_school_id=faculty.school_id, student_id=",".join(ids), student_name=display, student_program=descriptor, topic=payload.topic, preferred_date=local_today(), preferred_time="Walk-in", queue_id=queue.id, queue_number=queue.queue_number, consultation_type=request_type))
     db.add(NotificationRecord(faculty_school_id=faculty.school_id, type="new_request", title="New Kiosk Consultation Request", message=f"{display} requested consultation (Queue #{queue.queue_number})"))
     result = {'message': 'Consultation request submitted', 'queue_number': queue_label(queue.queue_number), 'queue_id': queue.id, 'faculty_school_id': faculty.school_id, 'faculty_name': faculty.full_name, 'faculty_office': faculty.office_location}
     if payload.submission_id: db.add(SubmissionReceipt(id=payload.submission_id, payload_hash=payload_hash, result=result))
