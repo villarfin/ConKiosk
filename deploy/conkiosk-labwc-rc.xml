@@ -7,7 +7,7 @@
       <action name="MoveTo" x="0" y="0" />
       <action name="ResizeTo" width="1920" height="1200" />
     </windowRule>
-    <windowRule identifier="conkiosk-tv">
+    <windowRule title="ConKiosk TV Display*">
       <fixedPosition>yes</fixedPosition>
       <action name="MoveTo" x="1920" y="0" />
       <action name="ResizeTo" width="1920" height="1200" />

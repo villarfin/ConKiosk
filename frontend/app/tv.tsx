@@ -15,6 +15,30 @@ interface FacultyStatus {
 }
 interface RescheduleAnnouncement { student_name: string; date: string; time: string; }
 
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const scheduleEntryPattern = /\b(Mon(?:day)?|Tue(?:sday)?|Wed(?:nesday)?|Thu(?:rsday)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)\s+(\d{1,2}:\d{2})\s*(?:–|-|to)\s*(\d{1,2}:\d{2})/gi;
+
+// The TV receives the readable schedule summary stored for each faculty. Group
+// consecutive days that have exactly the same hours so repeated entries such
+// as "Tue 11:30–16:00, Wed 11:30–16:00..." stay easy to scan from a distance.
+const compactSchedule = (officeHours: string) => {
+  const entries: Array<{ day: string; start: string; end: string }> = [];
+  for (const match of officeHours.matchAll(scheduleEntryPattern)) {
+    const day = WEEKDAYS.find(value => value.toLowerCase() === match[1].slice(0, 3).toLowerCase());
+    if (day) entries.push({ day, start: match[2].padStart(5, '0'), end: match[3].padStart(5, '0') });
+  }
+  if (!entries.length) return officeHours;
+
+  const groups: Array<typeof entries> = [];
+  for (const entry of entries.sort((a, b) => WEEKDAYS.indexOf(a.day) - WEEKDAYS.indexOf(b.day))) {
+    const previous = groups.at(-1);
+    const priorEntry = previous?.at(-1);
+    if (previous && priorEntry && priorEntry.start === entry.start && priorEntry.end === entry.end && WEEKDAYS.indexOf(entry.day) === WEEKDAYS.indexOf(priorEntry.day) + 1) previous.push(entry);
+    else groups.push([entry]);
+  }
+  return groups.map(group => `${group[0].day}${group.length > 1 ? `–${group.at(-1)!.day}` : ''}: ${group[0].start}–${group[0].end}`).join(' · ');
+};
+
 const enableSound = async () => {
   if (typeof window === 'undefined') return false;
   const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -63,6 +87,10 @@ export default function TVDisplay() {
   const [page, setPage] = useState(0);
   const [facultySpace, setFacultySpace] = useState({ width: 0, height: 0 });
   const { width, height } = useWindowDimensions();
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') document.title = 'ConKiosk TV Display';
+  }, []);
 
   const load = useCallback(async () => {
     if (loadingStatus.current) return;
@@ -193,9 +221,10 @@ export default function TVDisplay() {
 
 function FacultyCard({ person, scale = 1 }: { person: FacultyStatus; scale?: number }) {
   const color = person.availability_status === 'available' ? '#15803D' : person.availability_status === 'busy' ? '#B8860B' : '#B91C1C';
-  return <View style={[styles.facultyTile, { borderLeftColor: color, transform: [{ scale }] }]}>
-    <View style={[styles.profileCircle, { borderColor: color }]}>{person.profile_image ? <Image source={{ uri: photoUrl(person.profile_image) }} accessibilityLabel={`${person.full_name} profile photo`} style={styles.profilePhoto} /> : <Ionicons name="person" size={26} color="#C8A348" />}</View>
-    <View style={styles.facultyDetails}><Text style={styles.facultyCardName} numberOfLines={2}>{person.full_name}</Text>{person.role === 'it_chair' && <Text style={styles.itChairLabel}>IT CHAIR</Text>}<View style={styles.facultyOfficeRow}><Ionicons name="location-outline" size={13} color="#64748B" /><Text style={styles.facultyCardOffice} numberOfLines={1}>{person.office_location || 'Office not specified'}</Text></View><View style={styles.facultyOfficeRow}><Ionicons name="time-outline" size={13} color="#64748B" /><Text style={styles.facultyHours} numberOfLines={2}>{person.office_hours}</Text></View><View style={styles.facultyStatusRow}><View style={[styles.availabilityDot, { backgroundColor: color }]} /><Text style={[styles.facultyStatusText, { color }]}>{person.availability_status.toUpperCase()}</Text></View></View>
+  const isITChair = person.role === 'it_chair';
+  return <View style={[styles.facultyTile, isITChair && styles.itChairTile, { backgroundColor: isITChair ? '#FCE7F3' : '#FFFFFF', borderLeftColor: isITChair ? '#BE185D' : color, transform: [{ scale }] }]}>
+    <View style={[styles.profileCircle, isITChair && styles.itChairProfileCircle, { borderColor: isITChair ? '#DB2777' : color }]}>{person.profile_image ? <Image source={{ uri: photoUrl(person.profile_image) }} accessibilityLabel={`${person.full_name} profile photo`} style={styles.profilePhoto} /> : <Ionicons name="person" size={26} color={isITChair ? '#DB2777' : '#C8A348'} />}</View>
+    <View style={styles.facultyDetails}><Text style={[styles.facultyCardName, isITChair && styles.itChairCardName]} numberOfLines={2}>{person.full_name}</Text>{person.role === 'it_chair' && <Text style={styles.itChairLabel}>IT CHAIR</Text>}<View style={styles.facultyOfficeRow}><Ionicons name="location-outline" size={13} color={isITChair ? '#831843' : '#64748B'} /><Text style={[styles.facultyCardOffice, isITChair && styles.itChairCardMeta]} numberOfLines={1}>{person.office_location || 'Office not specified'}</Text></View><View style={styles.facultyOfficeRow}><Ionicons name="time-outline" size={13} color={isITChair ? '#831843' : '#64748B'} /><Text style={[styles.facultyHours, isITChair && styles.itChairCardMeta]} numberOfLines={2}>{compactSchedule(person.office_hours)}</Text></View><View style={styles.facultyStatusRow}><View style={[styles.availabilityDot, { backgroundColor: color }]} /><Text style={[styles.facultyStatusText, { color }]}>{person.availability_status.toUpperCase()}</Text></View></View>
   </View>;
 }
 
@@ -208,7 +237,7 @@ const styles = StyleSheet.create({
   profileCircle: { width: 56, height: 56, borderRadius: 28, borderWidth: 2, backgroundColor: '#172747', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 },
   profilePhoto: { width: '100%', height: '100%', resizeMode: 'cover' },
   facultyDetails: { flex: 1, minWidth: 0 },
-  facultyCardName: { color: '#172747', fontSize: 23, fontWeight: '800' }, itChairLabel: { color: '#8A681F', fontSize: 11, fontWeight: '900', letterSpacing: 1.1, marginTop: 2 },
+  facultyCardName: { color: '#172747', fontSize: 23, fontWeight: '800' }, itChairTile: { borderColor: '#BE185D', shadowColor: '#BE185D', shadowOpacity: 0.28 }, itChairProfileCircle: { backgroundColor: '#FFF1F8' }, itChairCardName: { color: '#500724' }, itChairCardMeta: { color: '#831843' }, itChairLabel: { color: '#831843', fontSize: 11, fontWeight: '900', letterSpacing: 1.1, marginTop: 2 },
   facultyOfficeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 },
   facultyCardOffice: { color: '#64748B', fontSize: 15, flexShrink: 1 },
   facultyHours: { color: '#475569', fontSize: 14, flexShrink: 1, fontWeight: '600' },
