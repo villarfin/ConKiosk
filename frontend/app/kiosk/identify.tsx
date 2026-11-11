@@ -61,6 +61,40 @@ const detectProgram = (qrContent: string) => {
   return QR_PROGRAMS.find(([qrValue]) => normalizedContent.includes(qrValue))?.[1] || '';
 };
 
+const isLikelyName = (value: string) => {
+  const normalized = value.replace(/^(?:student\s*)?name\s*[:=-]?\s*/i, '').trim();
+  return /^[A-Za-z][A-Za-z .,'-]{2,}$/.test(normalized)
+    && !/^student$/i.test(normalized)
+    && !detectProgram(normalized)
+    && !/^(?:year|section|course|program)\b/i.test(normalized);
+};
+
+// University IDs are not consistent: some QR codes put the name before the
+// number, while others place it immediately after. Prefer labelled or
+// delimiter-separated name values on either side of the ID.
+const nameFromQr = (qrContent: string, idMatch?: RegExpMatchArray | null) => {
+  if (!idMatch) return '';
+  const nameLabel = qrContent.match(/(?:student\s*)?name\s*[:=-]\s*([^|,;\n\r]+)/i);
+  if (nameLabel && isLikelyName(nameLabel[1])) return nameLabel[1].replace(/^(?:student\s*)?name\s*[:=-]?\s*/i, '').trim();
+
+  const values = qrContent.split(/[|,;\n\r\t]+/).map(value => value.trim()).filter(Boolean);
+  const idIndex = values.findIndex(value => value.includes(idMatch[0]));
+  const nearby = idIndex < 0 ? [] : [
+    values[idIndex].replace(idMatch[0], '').trim(),
+    values[idIndex + 1],
+    values[idIndex - 1],
+  ];
+  const delimitedName = nearby.find(value => value && isLikelyName(value));
+  if (delimitedName) return delimitedName.replace(/^(?:student\s*)?name\s*[:=-]?\s*/i, '').trim();
+
+  const beforeId = qrContent.slice(0, idMatch.index).trim();
+  if (isLikelyName(beforeId)) return beforeId;
+  const afterId = qrContent.slice((idMatch.index || 0) + idMatch[0].length);
+  const programIndex = QR_PROGRAMS.map(([value]) => afterId.toUpperCase().indexOf(value)).filter(index => index >= 0).sort((a, b) => a - b)[0];
+  const afterName = afterId.slice(0, programIndex ?? afterId.length).replace(/^[\s:|,;=-]+/, '').trim();
+  return isLikelyName(afterName) ? afterName : '';
+};
+
 interface Student {
   student_id: string;
   full_name: string;
@@ -119,9 +153,7 @@ export default function IdentifyScreen() {
     // Support both the school's STU-prefixed IDs and numeric IDs.
     const idMatch = normalizedScan.match(/\b(?:(?:STU)[- ]?|[A-Za-z]{2,5}(?=\d))?\d{7,12}\b/i);
     const studentId = idMatch?.[0] || normalizedScan;
-    const scannedName = idMatch
-      ? normalizedScan.slice(0, idMatch.index).trim()
-      : '';
+    const scannedName = nameFromQr(normalizedScan, idMatch);
     const scannedProgram = detectProgram(normalizedScan);
 
     setLookingUp(true);
