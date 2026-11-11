@@ -35,7 +35,7 @@ const QR_PROGRAMS: Array<[string, string]> = [
   ['BS APPLIED PHYSICS', 'BS Applied Physics'], ['BS CHEMISTRY', 'BS Chemistry'],
   ['BS ENVIRONMENTAL SCIENCE', 'BS Environmental Science'], ['BS FOOD TECHNOLOGY', 'BS Food Technology'],
   ['BS GEODETIC ENGINEERING', 'BS Geodetic Engineering'],
-  ['BS TECHNOLOGY COMMUNICATION MANAGEMENT', 'BS Technology Communication Management'],
+  ['BS TECHNOLOGY COMMUNICATION MANAGEMENT', 'BS Technology Communication Management'], ['BSTCM', 'BS Technology Communication Management'],
   ['BS AUTOTRONICS', 'BS Autotronics'], ['BS ELECTRONICS TECHNOLOGY', 'BS Electronics Technology'],
   ['BS ENERGY SYSTEMS AND MANAGEMENT', 'BS Energy Systems and Management'],
   ['BS ELECTRO-MECHANICAL TECHNOLOGY', 'BS Electro-Mechanical Technology'],
@@ -129,13 +129,15 @@ export default function IdentifyScreen() {
       const response = await fetch(apiUrl(`/kiosk/students/${studentId}`));
       if (response.ok) {
         const student: Student = await response.json();
-        // Scanning only verifies identity. These are required for the current request.
+        // A registered roster record is authoritative, so retain all of its
+        // details. This lets a QR scan complete the kiosk form without making
+        // students re-enter their program, year level, or section.
         setCurrentStudent({
           ...student,
           // Supports existing student records created before Program was added.
           program: student.program || scannedProgram || student.section?.split('-')[0] || '',
-          year_level: '',
-          section: '',
+          year_level: student.year_level || '',
+          section: student.section || '',
         });
       } else {
         // Not found - retain every useful value from a school-ID QR and let
@@ -424,7 +426,7 @@ export default function IdentifyScreen() {
               <View style={styles.requiredWarning}>
                 <Ionicons name="alert-circle-outline" size={16} color="#C62828" />
                 <Text style={styles.requiredWarningText}>
-                  Complete all fields before continuing. Year Level and Section are required after scanning.
+                  Complete all fields before continuing.
                 </Text>
               </View>
             )}
