@@ -203,25 +203,42 @@ export default function RequestsScreen() {
     }
   };
 
-  const completeOngoingConsultation = async () => {
+  const completeOngoingConsultation = async (advance: boolean) => {
     if (!selectedOngoing) return;
     setActionLoading(true);
     try {
       const result = await ApiClient.post(`/consultations/${selectedOngoing._id}/complete`, {
         notes: ongoingNotes,
-        advance: true,
+        advance,
       });
       setOngoingModalVisible(false);
       setSelectedOngoing(null);
       if (result.next_started) {
         Alert.alert('Consultation completed', 'The next student has been called.');
         loadRequests();
-      } else {
+      } else if (advance) {
         Alert.alert('Consultation completed', 'There are no more students in the queue.');
         router.replace('/(tabs)/dashboard');
+      } else {
+        Alert.alert('Consultation completed', 'The queue has been paused.');
+        loadRequests();
       }
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to complete consultation');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const saveOngoingNotes = async () => {
+    if (!selectedOngoing) return;
+    setActionLoading(true);
+    try {
+      await ApiClient.patch(`/consultations/${selectedOngoing._id}`, { notes: ongoingNotes });
+      Alert.alert('Saved', 'Consultation notes have been saved.');
+      loadRequests();
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to save consultation notes');
     } finally {
       setActionLoading(false);
     }
@@ -413,10 +430,26 @@ export default function RequestsScreen() {
               />
               <TouchableOpacity
                 style={[styles.completeButton, actionLoading && styles.submitButtonDisabled]}
-                onPress={completeOngoingConsultation}
+                onPress={() => completeOngoingConsultation(true)}
                 disabled={actionLoading}
               >
                 {actionLoading ? <ActivityIndicator color="#FFFFFF" /> : <><Ionicons name="checkmark-done" size={21} color="#FFFFFF" /><Text style={styles.modalButtonText}>Complete & Advance Queue</Text></>}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.pauseButton, actionLoading && styles.submitButtonDisabled]}
+                onPress={() => completeOngoingConsultation(false)}
+                disabled={actionLoading}
+              >
+                <Ionicons name="pause-circle" size={21} color="#A16207" />
+                <Text style={styles.pauseButtonText}>Complete & Pause Queue</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.saveNotesButton, actionLoading && styles.submitButtonDisabled]}
+                onPress={saveOngoingNotes}
+                disabled={actionLoading}
+              >
+                <Ionicons name="save-outline" size={20} color="#FFFFFF" />
+                <Text style={styles.modalButtonText}>Save Notes</Text>
               </TouchableOpacity>
             </ScrollView>}
           </View>
@@ -897,6 +930,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     marginTop: 8,
+    marginBottom: 16,
+  },
+  pauseButton: {
+    backgroundColor: '#FEF3C7',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  pauseButtonText: { color: '#A16207', fontSize: 16, fontWeight: '600' },
+  saveNotesButton: {
+    backgroundColor: '#2196F3',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
     marginBottom: 16,
   },
   submitButtonDisabled: {
