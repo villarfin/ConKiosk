@@ -58,7 +58,6 @@ export default function RequestsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<ConsultationRequest | null>(null);
-  const [actionModalVisible, setActionModalVisible] = useState(false);
   const [rescheduleModalVisible, setRescheduleModalVisible] = useState(false);
   const [declineModalVisible, setDeclineModalVisible] = useState(false);
   const [declineReason, setDeclineReason] = useState('');
@@ -114,20 +113,10 @@ export default function RequestsScreen() {
     setRefreshing(false);
   }, []);
 
-  const openActionModal = (request: ConsultationRequest) => {
-    setSelectedRequest(request);
-    setActionModalVisible(true);
-  };
-
   const openOngoingDetails = (consultation: OngoingConsultation) => {
     setSelectedOngoing(consultation);
     setOngoingNotes(consultation.notes || '');
     setOngoingModalVisible(true);
-  };
-
-  const closeActionModal = () => {
-    setActionModalVisible(false);
-    setSelectedRequest(null);
   };
 
   const handleAccept = async (request = selectedRequest) => {
@@ -140,7 +129,7 @@ export default function RequestsScreen() {
       });
 
       Alert.alert(result.consultation_status === 'ongoing' ? 'Session started' : 'Request accepted', result.consultation_status === 'ongoing' ? 'The consultation is ongoing. Your availability is Busy.' : 'The student is waiting in queue and will be called when their turn is reached.');
-      closeActionModal();
+      setSelectedRequest(null);
       loadRequests();
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to accept request');
@@ -150,7 +139,6 @@ export default function RequestsScreen() {
   };
 
   const openDeclineModal = () => {
-    setActionModalVisible(false);
     setDeclineModalVisible(true);
   };
 
@@ -183,7 +171,6 @@ export default function RequestsScreen() {
     setRescheduleTime(selectedDate);
     setCalendarMonth(monthStart(selectedDate));
     setClockMode('hour');
-    setActionModalVisible(false);
     setRescheduleModalVisible(true);
   };
 
@@ -323,10 +310,9 @@ export default function RequestsScreen() {
           </View>
         ) : (
           requests.map((request) => (
-            <TouchableOpacity
+            <View
               key={request._id}
               style={styles.requestCard}
-              onPress={() => openActionModal(request)}
             >
               <View style={styles.requestHeader}>
                 <View style={styles.studentInfo}>
@@ -340,6 +326,9 @@ export default function RequestsScreen() {
                     <Text style={styles.studentProgram}>{request.student_program}</Text>
                     <Text style={styles.studentId}>{request.student_id}</Text>
                   </View>
+                </View>
+                <View style={[styles.statusBadge, styles.pendingBadge, { backgroundColor: getStatusColor(request.status) }]}>
+                  <Text style={styles.statusText}>{request.status.toUpperCase()}</Text>
                 </View>
               </View>
 
@@ -362,31 +351,28 @@ export default function RequestsScreen() {
               </View>
 
               <View style={styles.requestFooter}>
-                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(request.status) }]}>
-                  <Text style={styles.statusText}>{request.status.toUpperCase()}</Text>
-                </View>
                 <View style={styles.inlineActions}>
                   <TouchableOpacity
                     accessibilityLabel={`Accept ${request.student_name}'s request`}
                     style={[styles.inlineAction, styles.inlineAccept]}
                     disabled={actionLoading}
-                    onPress={(event) => { event.stopPropagation(); handleAccept(request); }}
+                    onPress={() => handleAccept(request)}
                   ><Text style={styles.inlineActionText}>Accept</Text></TouchableOpacity>
                   <TouchableOpacity
                     accessibilityLabel={`Reschedule ${request.student_name}'s request`}
                     style={[styles.inlineAction, styles.inlineReschedule]}
                     disabled={actionLoading}
-                    onPress={(event) => { event.stopPropagation(); setSelectedRequest(request); openRescheduleModal(); }}
+                    onPress={() => { setSelectedRequest(request); openRescheduleModal(); }}
                   ><Text style={styles.inlineActionText}>Reschedule</Text></TouchableOpacity>
                   <TouchableOpacity
                     accessibilityLabel={`Decline ${request.student_name}'s request`}
                     style={[styles.inlineAction, styles.inlineDecline]}
                     disabled={actionLoading}
-                    onPress={(event) => { event.stopPropagation(); setSelectedRequest(request); openDeclineModal(); }}
+                    onPress={() => { setSelectedRequest(request); openDeclineModal(); }}
                   ><Text style={styles.inlineActionText}>Decline</Text></TouchableOpacity>
                 </View>
               </View>
-            </TouchableOpacity>
+            </View>
           ))
         )}
       </ScrollView>
@@ -433,74 +419,6 @@ export default function RequestsScreen() {
                 {actionLoading ? <ActivityIndicator color="#FFFFFF" /> : <><Ionicons name="checkmark-done" size={21} color="#FFFFFF" /><Text style={styles.modalButtonText}>Complete & Advance Queue</Text></>}
               </TouchableOpacity>
             </ScrollView>}
-          </View>
-        </View>
-      </Modal>
-
-      {/* Action Modal */}
-      <Modal
-        visible={actionModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={closeActionModal}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Request Actions</Text>
-              <TouchableOpacity onPress={closeActionModal}>
-                <Ionicons name="close" size={24} color="#666666" />
-              </TouchableOpacity>
-            </View>
-
-            {selectedRequest && (
-              <View style={styles.modalBody}>
-                <Text style={styles.modalStudentName}>{selectedRequest.student_name}</Text>
-                {selectedRequest.student_names && selectedRequest.student_names.length > 1 && (
-                  <View style={styles.groupMembers}>
-                    <Text style={styles.groupMembersTitle}>Group members ({selectedRequest.student_names.length})</Text>
-                    {selectedRequest.student_names.map((name, index) => (
-                      <Text key={`${name}-${index}`} style={styles.groupMember}>
-                        {index + 1}. {name}{selectedRequest.student_ids?.[index] ? ` — ${selectedRequest.student_ids[index]}` : ''}
-                      </Text>
-                    ))}
-                  </View>
-                )}
-                <Text style={styles.modalTopic}>{selectedRequest.topic}</Text>
-                <Text style={styles.modalSchedule}>
-                  {selectedRequest.preferred_date} at {selectedRequest.preferred_time}
-                </Text>
-
-                <View style={styles.modalActions}>
-                  <TouchableOpacity
-                    style={[styles.modalButton, styles.acceptButton]}
-                    onPress={handleAccept}
-                    disabled={actionLoading}
-                  >
-                    <Ionicons name="checkmark-circle" size={24} color="#FFFFFF" />
-                    <Text style={styles.modalButtonText}>Accept</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.modalButton, styles.rescheduleButton]}
-                    onPress={openRescheduleModal}
-                    disabled={actionLoading}
-                  >
-                    <Ionicons name="calendar" size={24} color="#FFFFFF" />
-                    <Text style={styles.modalButtonText}>Reschedule</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.modalButton, styles.declineButton]}
-                    onPress={openDeclineModal}
-                    disabled={actionLoading}
-                  >
-                    <Ionicons name="close-circle" size={24} color="#FFFFFF" />
-                    <Text style={styles.modalButtonText}>Decline</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
           </View>
         </View>
       </Modal>
@@ -704,6 +622,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF8E1',
   },
   requestHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
     marginBottom: 12,
   },
   studentInfo: {
@@ -803,18 +724,22 @@ const styles = StyleSheet.create({
   },
   inlineActions: {
     flexDirection: 'row',
-    gap: 5,
+    gap: 8,
     alignItems: 'center',
+    flex: 1,
   },
   inlineAction: {
-    paddingHorizontal: 7,
-    paddingVertical: 6,
-    borderRadius: 7,
+    flex: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 11,
+    borderRadius: 9,
+    alignItems: 'center',
   },
   inlineAccept: { backgroundColor: '#4CAF50' },
   inlineReschedule: { backgroundColor: '#FF9800' },
   inlineDecline: { backgroundColor: '#F44336' },
-  inlineActionText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  inlineActionText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  pendingBadge: { marginLeft: 10 },
   statusBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
