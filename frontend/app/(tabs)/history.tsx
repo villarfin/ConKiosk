@@ -35,7 +35,7 @@ interface Consultation {
   students?: { student_id: string; full_name: string }[];
 }
 
-const STATUS_FILTERS = ['all', 'scheduled', 'ongoing', 'completed', 'cancelled'];
+const STATUS_FILTERS = ['all', 'scheduled', 'completed', 'cancelled'];
 
 export default function HistoryScreen() {
   const [consultations, setConsultations] = useState<Consultation[]>([]);
@@ -77,7 +77,9 @@ export default function HistoryScreen() {
 
       endpoint += `${endpoint.includes('?') ? '&' : '?'}limit=100&offset=${page * 100}`;
       const data = await ApiClient.get(endpoint);
-      setConsultations(data);
+      // Active consultations are handled on Requests; History remains a record
+      // of scheduled and closed consultations only.
+      setConsultations(data.filter((consultation: Consultation) => consultation.status !== 'ongoing'));
       if (selectedConsultation) {
         const latest = await ApiClient.get(`/consultations/${selectedConsultation._id}`);
         setSelectedConsultation(previous => previous?._id === latest._id ? latest : previous);

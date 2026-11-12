@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ApiClient } from '@/src/utils/api';
 import { useAuth } from '@/src/contexts/AuthContext';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 const localDateString = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -37,9 +37,24 @@ interface ConsultationRequest {
   student_ids?: string[];
 }
 
+interface OngoingConsultation {
+  _id: string;
+  student_id: string;
+  student_name: string;
+  student_program: string;
+  topic: string;
+  date: string;
+  time: string;
+  status: string;
+  notes?: string;
+  students?: { student_id: string; full_name: string }[];
+}
+
 export default function RequestsScreen() {
   const { realtime } = useAuth();
+  const router = useRouter();
   const [requests, setRequests] = useState<ConsultationRequest[]>([]);
+  const [ongoingConsultations, setOngoingConsultations] = useState<OngoingConsultation[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<ConsultationRequest | null>(null);
@@ -53,6 +68,9 @@ export default function RequestsScreen() {
   const [clockMode, setClockMode] = useState<'hour' | 'minute'>('hour');
   const [clockModalVisible, setClockModalVisible] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [ongoingModalVisible, setOngoingModalVisible] = useState(false);
+  const [selectedOngoing, setSelectedOngoing] = useState<OngoingConsultation | null>(null);
+  const [ongoingNotes, setOngoingNotes] = useState('');
 
   useEffect(() => {
     loadRequests();
@@ -76,8 +94,12 @@ export default function RequestsScreen() {
 
   const loadRequests = async () => {
     try {
-      const data = await ApiClient.get('/consultation-requests?status=pending');
+      const [data, ongoing] = await Promise.all([
+        ApiClient.get('/consultation-requests?status=pending'),
+        ApiClient.get('/consultations?status=ongoing'),
+      ]);
       setRequests([...data].sort((first, second) => (first.queue_number ?? Number.MAX_SAFE_INTEGER) - (second.queue_number ?? Number.MAX_SAFE_INTEGER) || first.created_at.localeCompare(second.created_at) || first._id.localeCompare(second._id)));
+      setOngoingConsultations(ongoing);
     } catch (error: any) {
       console.error('Error loading requests:', error);
       Alert.alert('Error', 'Failed to load consultation requests');
@@ -97,17 +119,23 @@ export default function RequestsScreen() {
     setActionModalVisible(true);
   };
 
+  const openOngoingDetails = (consultation: OngoingConsultation) => {
+    setSelectedOngoing(consultation);
+    setOngoingNotes(consultation.notes || '');
+    setOngoingModalVisible(true);
+  };
+
   const closeActionModal = () => {
     setActionModalVisible(false);
     setSelectedRequest(null);
   };
 
-  const handleAccept = async () => {
-    if (!selectedRequest) return;
+  const handleAccept = async (request = selectedRequest) => {
+    if (!request) return;
 
     setActionLoading(true);
     try {
-      const result = await ApiClient.post(`/consultation-requests/${selectedRequest._id}/action`, {
+      const result = await ApiClient.post(`/consultation-requests/${request._id}/action`, {
         action: 'accept',
       });
 
@@ -188,6 +216,30 @@ export default function RequestsScreen() {
     }
   };
 
+  const completeOngoingConsultation = async () => {
+    if (!selectedOngoing) return;
+    setActionLoading(true);
+    try {
+      const result = await ApiClient.post(`/consultations/${selectedOngoing._id}/complete`, {
+        notes: ongoingNotes,
+        advance: true,
+      });
+      setOngoingModalVisible(false);
+      setSelectedOngoing(null);
+      if (result.next_started) {
+        Alert.alert('Consultation completed', 'The next student has been called.');
+        loadRequests();
+      } else {
+        Alert.alert('Consultation completed', 'There are no more students in the queue.');
+        router.replace('/(tabs)/dashboard');
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to complete consultation');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'pending':
@@ -229,8 +281,40 @@ export default function RequestsScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#2196F3']} />
         }
       >
+        {ongoingConsultations.length > 0 && (
+          <>
+            <Text style={styles.sectionLabel}>ONGOING CONSULTATION</Text>
+            {ongoingConsultations.map((consultation) => (
+              <TouchableOpacity
+                key={consultation._id}
+                style={[styles.requestCard, styles.ongoingCard]}
+                onPress={() => openOngoingDetails(consultation)}
+              >
+                <View style={styles.requestHeader}>
+                  <View style={styles.studentInfo}>
+                    <View style={[styles.avatarPlaceholder, styles.ongoingAvatar]}>
+                      <Text style={styles.avatarText}>{consultation.student_name.charAt(0)}</Text>
+                    </View>
+                    <View style={styles.studentDetails}>
+                      <Text style={styles.studentName}>{consultation.student_name}</Text>
+                      <Text style={styles.studentProgram}>{consultation.student_program}</Text>
+                      <Text style={styles.studentId}>{consultation.student_id}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.ongoingBadge}><Text style={styles.statusText}>ONGOING</Text></View>
+                </View>
+                <Text style={styles.topicText}>{consultation.topic}</Text>
+                <View style={styles.ongoingFooter}>
+                  <Text style={styles.ongoingHint}>Tap to view consultation details</Text>
+                  <Ionicons name="chevron-forward" size={20} color="#E65100" />
+                </View>
+              </TouchableOpacity>
+            ))}
+          </>
+        )}
+        {requests.length > 0 && <Text style={styles.sectionLabel}>PENDING REQUESTS</Text>}
         {requests.length === 0 ? (
-          <View style={styles.emptyContainer}>
+          ongoingConsultations.length === 0 && <View style={styles.emptyContainer}>
             <Ionicons name="mail-open-outline" size={64} color="#BDBDBD" />
             <Text style={styles.emptyTitle}>No Pending Requests</Text>
             <Text style={styles.emptyText}>
@@ -281,12 +365,77 @@ export default function RequestsScreen() {
                 <View style={[styles.statusBadge, { backgroundColor: getStatusColor(request.status) }]}>
                   <Text style={styles.statusText}>{request.status.toUpperCase()}</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color="#BDBDBD" />
+                <View style={styles.inlineActions}>
+                  <TouchableOpacity
+                    accessibilityLabel={`Accept ${request.student_name}'s request`}
+                    style={[styles.inlineAction, styles.inlineAccept]}
+                    disabled={actionLoading}
+                    onPress={(event) => { event.stopPropagation(); handleAccept(request); }}
+                  ><Text style={styles.inlineActionText}>Accept</Text></TouchableOpacity>
+                  <TouchableOpacity
+                    accessibilityLabel={`Reschedule ${request.student_name}'s request`}
+                    style={[styles.inlineAction, styles.inlineReschedule]}
+                    disabled={actionLoading}
+                    onPress={(event) => { event.stopPropagation(); setSelectedRequest(request); openRescheduleModal(); }}
+                  ><Text style={styles.inlineActionText}>Reschedule</Text></TouchableOpacity>
+                  <TouchableOpacity
+                    accessibilityLabel={`Decline ${request.student_name}'s request`}
+                    style={[styles.inlineAction, styles.inlineDecline]}
+                    disabled={actionLoading}
+                    onPress={(event) => { event.stopPropagation(); setSelectedRequest(request); openDeclineModal(); }}
+                  ><Text style={styles.inlineActionText}>Decline</Text></TouchableOpacity>
+                </View>
               </View>
             </TouchableOpacity>
           ))
         )}
       </ScrollView>
+
+      <Modal
+        visible={ongoingModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setOngoingModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Consultation Details</Text>
+              <TouchableOpacity onPress={() => setOngoingModalVisible(false)}>
+                <Ionicons name="close" size={24} color="#666666" />
+              </TouchableOpacity>
+            </View>
+            {selectedOngoing && <ScrollView style={styles.modalBody}>
+              <Text style={styles.modalStudentName}>{selectedOngoing.student_name}</Text>
+              {selectedOngoing.students && selectedOngoing.students.length > 1 && (
+                <View style={styles.groupMembers}>
+                  <Text style={styles.groupMembersTitle}>Group members ({selectedOngoing.students.length})</Text>
+                  {selectedOngoing.students.map((student) => <Text key={student.student_id} style={styles.groupMember}>{student.full_name} — {student.student_id}</Text>)}
+                </View>
+              )}
+              <Text style={styles.modalTopic}>{selectedOngoing.topic}</Text>
+              <Text style={styles.modalSchedule}>{selectedOngoing.date} at {selectedOngoing.time}</Text>
+              <Text style={styles.inputLabel}>Consultation notes</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Add consultation notes..."
+                value={ongoingNotes}
+                onChangeText={setOngoingNotes}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+              />
+              <TouchableOpacity
+                style={[styles.completeButton, actionLoading && styles.submitButtonDisabled]}
+                onPress={completeOngoingConsultation}
+                disabled={actionLoading}
+              >
+                {actionLoading ? <ActivityIndicator color="#FFFFFF" /> : <><Ionicons name="checkmark-done" size={21} color="#FFFFFF" /><Text style={styles.modalButtonText}>Complete & Advance Queue</Text></>}
+              </TouchableOpacity>
+            </ScrollView>}
+          </View>
+        </View>
+      </Modal>
 
       {/* Action Modal */}
       <Modal
@@ -513,6 +662,13 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
   },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#666666',
+    marginBottom: 8,
+    letterSpacing: 0.5,
+  },
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -542,6 +698,11 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
   },
+  ongoingCard: {
+    borderWidth: 1,
+    borderColor: '#FFCC80',
+    backgroundColor: '#FFF8E1',
+  },
   requestHeader: {
     marginBottom: 12,
   },
@@ -561,6 +722,9 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  ongoingAvatar: {
+    backgroundColor: '#F57C00',
   },
   studentDetails: {
     flex: 1,
@@ -618,6 +782,39 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#F0F0F0',
   },
+  ongoingBadge: {
+    backgroundColor: '#F57C00',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  ongoingFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#FFE0B2',
+  },
+  ongoingHint: {
+    fontSize: 13,
+    color: '#A34A00',
+    fontWeight: '600',
+  },
+  inlineActions: {
+    flexDirection: 'row',
+    gap: 5,
+    alignItems: 'center',
+  },
+  inlineAction: {
+    paddingHorizontal: 7,
+    paddingVertical: 6,
+    borderRadius: 7,
+  },
+  inlineAccept: { backgroundColor: '#4CAF50' },
+  inlineReschedule: { backgroundColor: '#FF9800' },
+  inlineDecline: { backgroundColor: '#F44336' },
+  inlineActionText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
   statusBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -765,6 +962,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 8,
+  },
+  completeButton: {
+    backgroundColor: '#4CAF50',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 16,
   },
   submitButtonDisabled: {
     backgroundColor: '#90CAF9',
