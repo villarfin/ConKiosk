@@ -223,8 +223,17 @@ export default function RequestsScreen() {
         Alert.alert('Consultation completed', 'The next student has been called.');
         loadRequests();
       } else if (advance) {
-        Alert.alert('Consultation completed', 'There are no more students in the queue.');
-        router.replace('/(tabs)/dashboard');
+        // A pending request still needs the teacher's Accept/Reschedule/Decline
+        // decision, so it must keep the teacher on Requests rather than ending
+        // the workflow at the dashboard.
+        const pending = await ApiClient.get('/consultation-requests?status=pending');
+        if (pending.length > 0) {
+          Alert.alert('Consultation completed', `${pending.length} pending ${pending.length === 1 ? 'request still needs' : 'requests still need'} your action.`);
+          await loadRequests();
+        } else {
+          Alert.alert('Consultation completed', 'There are no more students in the queue.');
+          router.replace('/(tabs)/dashboard');
+        }
       } else {
         Alert.alert('Consultation completed', 'The queue has been paused.');
         loadRequests();
