@@ -128,9 +128,15 @@ export default function RequestsScreen() {
         action: 'accept',
       });
 
-      Alert.alert(result.consultation_status === 'ongoing' ? 'Session started' : 'Request accepted', result.consultation_status === 'ongoing' ? 'The consultation is ongoing. Your availability is Busy.' : 'The student is waiting in queue and will be called when their turn is reached.');
       setSelectedRequest(null);
-      loadRequests();
+      if (result.consultation_status === 'ongoing') {
+        const ongoing = await ApiClient.get('/consultations?status=ongoing');
+        const acceptedConsultation = ongoing.find((consultation: OngoingConsultation) => consultation.student_id === request.student_id);
+        if (acceptedConsultation) openOngoingDetails(acceptedConsultation);
+      } else {
+        Alert.alert('Request accepted', 'The student is waiting in queue and will be called when their turn is reached.');
+      }
+      await loadRequests();
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to accept request');
     } finally {
