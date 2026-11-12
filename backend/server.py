@@ -381,7 +381,36 @@ async def advance_queue(db: AsyncSession, faculty: Faculty) -> Optional[Consulta
     if not head:
         return None
     consultation = await db.scalar(select(ConsultationRecord).where(and_(ConsultationRecord.queue_id == head.id, ConsultationRecord.status == 'scheduled')).order_by(ConsultationRecord.created_at).limit(1))
-    # A pending request must be accepted before its student can be called.
+    if not consultation:
+        # Advancing the queue is the faculty's opt-in to automatic acceptance.
+        # Pausing the queue bypasses this function, leaving requests pending for
+        # the faculty to review manually when they are ready again.
+        request = await db.scalar(select(ConsultationRequestRecord).where(and_(
+            ConsultationRequestRecord.faculty_school_id == faculty.school_id,
+            ConsultationRequestRecord.queue_id == head.id,
+            ConsultationRequestRecord.status == 'pending',
+        )).order_by(ConsultationRequestRecord.created_at, ConsultationRequestRecord.id).limit(1))
+        if request:
+            request.status = 'accepted'
+            consultation = ConsultationRecord(
+                faculty_school_id=faculty.school_id,
+                student_id=request.student_id,
+                student_name=request.student_name,
+                student_program=request.student_program,
+                topic=request.topic,
+                date=request.preferred_date,
+                time=request.preferred_time,
+                status='scheduled',
+                queue_id=request.queue_id,
+                queue_number=request.queue_number,
+                consultation_type=request.consultation_type,
+            )
+            consultation.students = head.student_details or [
+                {'student_id': student_id, 'full_name': student_name}
+                for student_id, student_name in zip(head.student_ids, head.student_names)
+            ]
+            db.add(consultation)
+    # A queue ticket can only be served once it has a consultation record.
     if not consultation:
         return None
     begin_consultation(consultation, faculty)

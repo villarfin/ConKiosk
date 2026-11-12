@@ -220,8 +220,10 @@ export default function RequestsScreen() {
       setOngoingModalVisible(false);
       setSelectedOngoing(null);
       if (result.next_started) {
-        Alert.alert('Consultation completed', 'The next student has been called.');
-        loadRequests();
+        const ongoing = await ApiClient.get('/consultations?status=ongoing');
+        const nextConsultation = ongoing[0];
+        await loadRequests();
+        if (nextConsultation) openOngoingDetails(nextConsultation);
       } else if (advance) {
         // A pending request still needs the teacher's Accept/Reschedule/Decline
         // decision, so it must keep the teacher on Requests rather than ending

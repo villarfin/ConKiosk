@@ -45,7 +45,6 @@ async def main():
         requests = list((await db.scalars(select(app.ConsultationRequestRecord).order_by(app.ConsultationRequestRecord.queue_number))).all())
     first, duplicate = await asyncio.gather(action(requests[0].id), action(requests[0].id))
     assert sorted([first if isinstance(first, int) else 200, duplicate if isinstance(duplicate, int) else 200]) == [200, 409]
-    await asyncio.gather(action(requests[1].id), action(requests[2].id))
     async with app.SessionLocal() as db:
         status = (await app.tv_status(db))[0]
         assert status['now_serving']['queue_number'] == 'A001', status
@@ -60,19 +59,13 @@ async def main():
         status = (await app.tv_status(db))[0]
         assert status['now_serving']['queue_number'] == 'A002' and status['next_queue_numbers'] == ['A003', 'A004'], status
         assert faculty.availability_status == 'busy'
-        later = await db.scalar(select(app.ConsultationRecord).where(app.ConsultationRecord.queue_number == 3))
-        try:
-            await app.consultation_start(later.id, db, faculty)
-            raise AssertionError('A second session started')
-        except HTTPException as error:
-            assert error.status_code == 409
         try:
             await app.consultation_update(first.id, app.ConsultationUpdate(notes='Forbidden'), db, faculty)
             raise AssertionError('Completed consultation was editable')
         except HTTPException as error:
             assert error.status_code == 409
         await db.rollback()
-    # Finish both accepted sessions; the unaccepted fourth request must not start.
+    # Advancing automatically accepts and starts the next pending queue request.
     for number in (2, 3):
         async with app.SessionLocal() as db:
             faculty = await db.scalar(select(app.Faculty).where(app.Faculty.school_id == 'QUEUE_TEST'))
@@ -80,11 +73,7 @@ async def main():
             await app.consultation_complete(row.id, None, db, faculty)
     async with app.SessionLocal() as db:
         status = (await app.tv_status(db))[0]
-        assert status['now_serving'] is None and status['next_queue_numbers'] == ['A004'], status
-    await action(requests[3].id)
-    async with app.SessionLocal() as db:
-        status = (await app.tv_status(db))[0]
-        assert status['now_serving']['queue_number'] == 'A004'
+        assert status['now_serving']['queue_number'] == 'A004' and status['next_queue_numbers'] == [], status
         faculty = await db.scalar(select(app.Faculty).where(app.Faculty.school_id == 'QUEUE_TEST'))
         faculty.accepting_consultations = False
         await db.commit()
@@ -120,9 +109,9 @@ async def main():
     allocated = await asyncio.gather(*(submit_to_faculty(index) for index in range(10)))
     assert len(set(allocated)) == 10 and set(allocated) == {f'A{number:03d}' for number in range(5, 15)}, allocated
     await app.startup()
-    assert await submit_to_faculty(20) == 'A015'
+    assert await submit_to_faculty(21) == 'A015'
     await app.engine.dispose()
-    print('PASS: concurrent submissions/acceptance, duplicate protection, FIFO, automatic advancement, pending gate, notes, timing and terminal lock')
+    print('PASS: concurrent submissions/acceptance, duplicate protection, FIFO, automatic advancement, notes, timing and terminal lock')
 
 
 if __name__ == '__main__':
