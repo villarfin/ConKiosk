@@ -21,6 +21,8 @@ import { useAuth } from '@/src/contexts/AuthContext';
 import { ApiClient } from '@/src/utils/api';
 import { ScheduleEditor, ScheduleEntry } from '@/src/components/ScheduleEditor';
 
+const MAX_PROFILE_PHOTO_BYTES = 30 * 1024 * 1024;
+
 export default function ProfileScreen() {
   const { faculty, logout, updateFaculty } = useAuth();
   const router = useRouter();
@@ -70,6 +72,10 @@ export default function ProfileScreen() {
     if (result.canceled) return;
 
     const asset = result.assets[0];
+    if (asset.fileSize && asset.fileSize > MAX_PROFILE_PHOTO_BYTES) {
+      Alert.alert('Photo too large', 'Profile photos must not exceed 30 MB. Please choose a smaller image.');
+      return;
+    }
     if (!asset.base64) {
       Alert.alert('Image unavailable', 'The selected image could not be read. Please try a JPG or PNG image.');
       return;
@@ -203,6 +209,7 @@ export default function ProfileScreen() {
           <Text style={styles.profileName}>{faculty?.full_name}</Text>
           <Text style={styles.profileDepartment}>{faculty?.department}</Text>
           <Text style={styles.profileSchoolId}>{faculty?.school_id}</Text>
+          <Text style={styles.photoHint}>Tap the photo to change it. Maximum file size: 30 MB.</Text>
         </View>
 
         {/* Profile Details */}
@@ -526,6 +533,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999999',
     marginTop: 4,
+  },
+  photoHint: {
+    marginTop: 10,
+    fontSize: 12,
+    color: '#666666',
+    textAlign: 'center',
   },
   section: {
     backgroundColor: '#FFFFFF',

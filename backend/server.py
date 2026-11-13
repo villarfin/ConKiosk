@@ -187,7 +187,9 @@ def audit(db, actor, action, target):
 class BaseModel(PydanticBaseModel):
     @model_validator(mode='after')
     def validate_fields(self):
-        limits = {'school_id': 64, 'faculty_school_id': 64, 'student_id': 64, 'topic': 500, 'reason': 2000, 'notes': 20000, 'remarks': 2000, 'year_level': 64, 'section': 64, 'program': 128, 'profile_image': 750000, 'privacy_version': 64, 'submission_id': 36, 'reschedule_date': 10, 'reschedule_time': 64}
+        # Base64 expands the original image by roughly one third. The decoded
+        # photo is still strictly limited to 30 MiB in decode_photo below.
+        limits = {'school_id': 64, 'faculty_school_id': 64, 'student_id': 64, 'topic': 500, 'reason': 2000, 'notes': 20000, 'remarks': 2000, 'year_level': 64, 'section': 64, 'program': 128, 'profile_image': 42 * 1024 * 1024, 'privacy_version': 64, 'submission_id': 36, 'reschedule_date': 10, 'reschedule_time': 64}
         for key in type(self).model_fields:
             value = getattr(self, key)
             if not isinstance(value, str): continue
@@ -216,7 +218,7 @@ def decode_photo(value, enforce_size=True):
     if not match: raise ValueError('Use a JPG, PNG or WebP profile photo')
     try: data = base64.b64decode(match[2], validate=True)
     except Exception: raise ValueError('Invalid profile photo')
-    if enforce_size and len(data) > 512 * 1024: raise ValueError('Profile photo must be at most 512 KB')
+    if enforce_size and len(data) > 30 * 1024 * 1024: raise ValueError('Profile photo must not exceed 30 MB')
     if not (data.startswith(b'\xff\xd8\xff') or data.startswith(b'\x89PNG\r\n\x1a\n') or (data.startswith(b'RIFF') and data[8:12] == b'WEBP')): raise ValueError('Invalid image content')
     return data, f'image/{match[1]}'
 
